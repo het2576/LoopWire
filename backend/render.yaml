@@ -1,0 +1,51 @@
+services:
+  # A single free web service handles everything: the dashboard-facing API,
+  # the Telegram bot (webhook mode - see /telegram-webhook in app/main.py),
+  # and two on-demand endpoints that replace always-on background processes:
+  #   - /send-digest        builds + emails a dispatch (was an internal cron)
+  #   - /process-pending    runs extraction + summarization on saved items
+  #                         (was the always-on app.worker polling loop)
+  # Both are meant to be pinged by free external cron jobs (cron-job.org) -
+  # see SETUP.md sections 5-7 for webhook registration and both cron setups.
+  # There's no separate worker service anymore; Render's free tier only
+  # really supports "Web Service" (background workers need a paid plan), and
+  # this architecture doesn't need one. BACKEND_BASE_URL must be this
+  # service's real https://*.onrender.com URL so the webhook and both crons
+  # actually reach it.
+  - type: web
+    name: loopwire-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install uv && uv sync --frozen
+    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: SEND_LOOPWIRE_SECRET
+        sync: false
+      - key: PROCESS_PENDING_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: RESEND_API_KEY
+        sync: false
+      - key: LOOPWIRE_FROM_EMAIL
+        sync: false
+      - key: DASHBOARD_BASE_URL
+        sync: false
+      - key: BACKEND_BASE_URL
+        sync: false
+      - key: INTERNAL_AUTH_SECRET
+        sync: false
+      - key: LOOPWIRE_PERIOD
+        value: daily
+      - key: LOOPWIRE_SEND_HOUR_IST
+        value: "9"

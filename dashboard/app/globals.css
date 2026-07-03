@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #12161b;
+  --ink-raised: #1b2129;
+  --paper: #f3eee3;
+  --signal: #e08a3c;
+  --wire: #8a9a9c;
+  --alert: #d9695f;
+  --ok: #4c8c6b;
+
+  --font-display: var(--font-plex-mono);
+  --font-body: var(--font-plex-sans);
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-raised: var(--ink-raised);
+  --color-paper: var(--paper);
+  --color-signal: var(--signal);
+  --color-wire: var(--wire);
+  --color-alert: var(--alert);
+  --color-ok: var(--ok);
+  --font-mono: var(--font-display);
+  --font-sans: var(--font-body);
+}
+
+body {
+  background-color: var(--ink);
+  /* Faint schematic dot-grid so sparse pages read as "quiet wire room",
+     not "broken/empty" - deliberately subtle, never competes with content. */
+  background-image: radial-gradient(circle, rgba(243, 238, 227, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+  color: var(--paper);
+  font-family: var(--font-body);
+}
+
+/* Signature element: each item renders as a transmission slip torn
+   from a wire-service printer - a punched perforation along the top edge. */
+.slip {
+  position: relative;
+  isolation: isolate;
+}
+
+.slip::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 9px;
+  background-image: radial-gradient(circle at 5px 0px, var(--ink) 4.5px, transparent 5px);
+  background-size: 15px 9px;
+  background-repeat: repeat-x;
+  background-position: 6px 0;
+  z-index: 1;
+}
+
+@keyframes teletype-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.teletype-in {
+  animation: teletype-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes signal-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.signal-dot {
+  animation: signal-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .teletype-in {
+    animation: none;
+  }
+  .signal-dot {
+    animation: none;
+  }
+}

@@ -1,0 +1,25 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+backend/*.db
+
+# Env
+.env
+backend/.env
+
+# Node / Next.js
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env*.local
+
+# OS
+.DS_Store
+
+#md
+prd.md
+
+.claude
+prdv2.md
