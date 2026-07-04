@@ -60,10 +60,19 @@ export default async function SettingsPage({
         <h2 className="font-mono text-sm font-semibold uppercase tracking-wide">Telegram</h2>
 
         {me?.telegram_chat_id ? (
-          <p className="mt-3 flex items-center gap-2 text-[14px] text-ink/70">
-            <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden />
-            Connected — forward links to <span className="font-mono text-ink">@loopwirexbot</span> to start saving.
-          </p>
+          code ? (
+            <div className="mt-3 rounded-md border border-ok/40 bg-ok/10 px-4 py-3">
+              <p className="font-mono text-[13px] font-semibold text-ok">✅ Telegram connected successfully!</p>
+              <p className="mt-1 text-[13px] text-ink/70">
+                Forward any link to <span className="font-mono text-ink">@loopwirexbot</span> to start saving.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 flex items-center gap-2 text-[14px] text-ink/70">
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden />
+              Connected — forward links to <span className="font-mono text-ink">@loopwirexbot</span> to start saving.
+            </p>
+          )
         ) : (
           <>
             <p className="mt-2 text-[13px] leading-relaxed text-ink/60">

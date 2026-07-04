@@ -242,9 +242,10 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user.telegram_chat_id = chat_id
         connection.used_at = dt.datetime.now(dt.timezone.utc)
         db.commit()
+        user_email = user.email
 
     await update.effective_message.reply_text(
-        f"✅ Connected to *{_escape(user.email)}*\\! Forward any link to start saving\\.",
+        f"✅ Connected to *{_escape(user_email)}*\\! Forward any link to start saving\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
