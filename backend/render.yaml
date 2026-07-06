@@ -45,6 +45,10 @@ services:
         sync: false
       - key: INTERNAL_AUTH_SECRET
         sync: false
+      - key: WEBSHARE_PROXY_USERNAME
+        sync: false
+      - key: WEBSHARE_PROXY_PASSWORD
+        sync: false
       - key: LOOPWIRE_PERIOD
         value: daily
       - key: LOOPWIRE_SEND_HOUR_IST

@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     # if blank - see app/auth.py.
     internal_auth_secret: str = ""
 
+    # --- Webshare residential proxy (optional) ---
+    # YouTube blocks transcript requests from cloud-provider IPs (Render,
+    # AWS, GCP, etc. - see extraction.py). Routing through a residential
+    # proxy works around this; Webshare is youtube-transcript-api's own
+    # documented recommendation for this exact problem. Left blank by
+    # default - YouTube extraction just fails with a clear error until set.
+    webshare_proxy_username: str = ""
+    webshare_proxy_password: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

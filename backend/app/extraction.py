@@ -26,6 +26,9 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     VideoUnavailable,
 )
+from youtube_transcript_api.proxies import WebshareProxyConfig
+
+from app.config import get_settings
 
 MIN_ARTICLE_WORDS = 200
 MIN_PDF_WORDS = 50
@@ -55,6 +58,22 @@ def _base_result(*extra_keys: str) -> dict:
 
 
 # ── YouTube ───────────────────────────────────────────────────────────────────
+
+def _youtube_transcript_client() -> YouTubeTranscriptApi:
+    """Build the transcript client, routed through a residential proxy if
+    Webshare credentials are configured - YouTube blocks transcript requests
+    from cloud-provider IPs (Render, AWS, GCP, etc.) outright, so without a
+    proxy every YouTube extraction fails once deployed off a residential IP."""
+    settings = get_settings()
+    if settings.webshare_proxy_username and settings.webshare_proxy_password:
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=settings.webshare_proxy_username,
+                proxy_password=settings.webshare_proxy_password,
+            )
+        )
+    return YouTubeTranscriptApi()
+
 
 def extract_youtube_video_id(url: str) -> str | None:
     for pattern in YOUTUBE_ID_PATTERNS:
@@ -92,7 +111,7 @@ def extract_youtube(url: str) -> dict:
         pass
 
     try:
-        api = YouTubeTranscriptApi()
+        api = _youtube_transcript_client()
         try:
             transcript = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
         except NoTranscriptFound:

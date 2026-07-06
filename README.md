@@ -353,6 +353,11 @@ check `git status` first if unsure.
 - **Extraction is best-effort.** Paywalled articles and captionless videos
   are correctly flagged as `extraction_failed` rather than guessed at, but
   some forwarded links will only ever show up as a raw link.
+- **YouTube extraction requires a residential proxy once deployed to any
+  cloud host** — YouTube blocks transcript requests from datacenter IPs
+  (Render, AWS, GCP, etc.) outright. Without a proxy configured, every
+  YouTube link fails with a clear `extraction_failed` reason instead of
+  silently hanging. See [SETUP.md](SETUP.md) §11 to fix with Webshare.
 - **New sending domains land in spam initially.** Even with SPF/DKIM/DMARC
   configured, a brand-new domain has no sender reputation — inherent to
   email delivery, not a code issue.

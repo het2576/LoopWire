@@ -238,6 +238,41 @@ needs your production URL registered, or sign-in will fail with
    app (**Audience → Publish app**) if you want any Google account to be
    able to sign in.
 
+## 11. YouTube extraction proxy (optional — fixes cloud-IP blocking)
+
+YouTube blocks transcript requests from datacenter IPs outright — this means
+YouTube extraction **will fail on every single video** once deployed to
+Render, AWS, GCP, or any other cloud host, even though it works fine from
+your home machine during local dev. The error looks like:
+
+```
+YouTube is blocking requests from your IP... You are doing requests from an
+IP belonging to a cloud provider...
+```
+
+The fix is routing transcript requests through a residential proxy —
+`youtube-transcript-api`'s own maintainers specifically recommend
+[Webshare](https://www.webshare.io) for this.
+
+1. Sign up at https://www.webshare.io — the cheapest "Residential" proxy
+   plan (a few dollars/month for low volume) is enough for personal use.
+2. **Dashboard → Proxy → Settings** — copy your **Proxy Username** and
+   **Proxy Password** (not your account login — a separate generated
+   username/password pair specifically for proxy auth).
+3. Set in `backend/.env`:
+   - `WEBSHARE_PROXY_USERNAME`
+   - `WEBSHARE_PROXY_PASSWORD`
+4. On Render, add the same two values in the **Environment** tab (they're
+   already declared in `render.yaml` as optional `sync: false` vars).
+5. Restart/redeploy. YouTube extraction now routes through the proxy — no
+   other code path changes.
+
+This is entirely optional — leave both blank to run without a proxy.
+YouTube links will keep failing with a clear, visible error
+(`extraction_failed`, shown honestly in Telegram/dashboard) instead of
+hanging or crashing; everything else (articles, GitHub, Reddit, HN, PDFs)
+is unaffected either way.
+
 ## Running everything locally
 
 From `backend/`:
