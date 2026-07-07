@@ -59,11 +59,18 @@ def classify_url(url: str) -> str:
         return ITEM_TYPE_UNSUPPORTED  # subreddit listing, profile, etc.
 
     if any(domain in lowered for domain in GITHUB_DOMAINS):
-        # Only repos (github.com/owner/repo), not raw files, gists, etc.
+        # Only repos (github.com/owner/repo), not a specific file (/blob/),
+        # gist, or raw link - those are a single file's content, not a repo,
+        # and get classified by their actual file type instead.
         parts = [p for p in url.split("/") if p and not p.startswith("http")]
-        if len(parts) >= 2 and "gist" not in lowered and "raw" not in lowered:
+        is_repo_root = len(parts) >= 2 and not any(
+            marker in lowered for marker in ("gist", "raw", "/blob/")
+        )
+        if is_repo_root:
             return ITEM_TYPE_GITHUB
-        return ITEM_TYPE_ARTICLE  # fall back to article for raw files
+        if lowered.endswith(".pdf"):
+            return ITEM_TYPE_PDF
+        return ITEM_TYPE_ARTICLE  # fall back to article for raw/blob files
 
     if any(domain in lowered for domain in HN_DOMAINS):
         if "item?id=" in lowered:

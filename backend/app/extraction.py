@@ -154,6 +154,10 @@ def extract_article(url: str) -> dict:
     """
     result = _base_result()
 
+    raw_url = github_blob_to_raw(url)
+    if raw_url:
+        url = raw_url
+
     try:
         downloaded = trafilatura.fetch_url(url)
     except Exception as exc:
@@ -285,6 +289,23 @@ def extract_reddit(url: str) -> dict:
 _GITHUB_REPO_RE = re.compile(
     r"github\.com/([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:/|$)"
 )
+
+_GITHUB_BLOB_RE = re.compile(
+    r"github\.com/([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+)/blob/([^/]+)/(.+)$"
+)
+
+
+def github_blob_to_raw(url: str) -> str | None:
+    """Convert a github.com/.../blob/... file-view URL to its raw content
+    URL. A /blob/ page is GitHub's HTML file viewer (JS-rendered chrome
+    around the content), not the file itself - fetching it directly returns
+    the viewer page, not the PDF/text/code inside it."""
+    match = _GITHUB_BLOB_RE.search(url)
+    if not match:
+        return None
+    owner, repo, branch, path = match.groups()
+    repo = repo.removesuffix(".git")
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
 
 _README_CANDIDATES = [
     "README.md", "readme.md", "README.rst", "readme.rst", "README.txt", "README",
@@ -456,6 +477,10 @@ def extract_pdf(url: str) -> dict:
     """
     result = _base_result()
 
+    raw_url = github_blob_to_raw(url)
+    if raw_url:
+        url = raw_url
+
     # Download
     try:
         resp = httpx.get(
@@ -475,6 +500,13 @@ def extract_pdf(url: str) -> dict:
     content_type = resp.headers.get("content-type", "")
     if "pdf" not in content_type.lower() and not url.lower().endswith(".pdf"):
         result["error"] = "not_a_pdf: URL did not return a PDF content-type"
+        return result
+
+    if resp.content.startswith(b"version https://git-lfs.github.com/spec/"):
+        result["error"] = (
+            "git_lfs_pointer: file is stored via Git LFS - raw.githubusercontent.com "
+            "only returns a small pointer file, not the actual PDF content"
+        )
         return result
 
     # Parse

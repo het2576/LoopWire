@@ -51,6 +51,32 @@ EXTRACTABLE_TYPES = [
 ]
 
 
+_FRIENDLY_EXTRACTION_REASONS = {
+    "thin_content": "not enough readable text found (likely paywalled or a JS-rendered page)",
+    "parse_failed": "couldn't extract readable content (likely a JS-rendered page)",
+    "fetch_failed": "couldn't fetch the page (possible paywall or block)",
+    "no_readme": "no README found in that repo (or it doesn't exist / is private)",
+    "no_captions": "this video has no captions available",
+    "transcript_fetch_failed": "YouTube blocked the caption request from our server",
+    "video_unavailable": "this video is unavailable (deleted, private, or region-locked)",
+    "git_lfs_pointer": "this file is stored via Git LFS and can't be fetched directly",
+    "unsupported_source": "this type of link isn't supported yet",
+    "invalid_url": "couldn't understand that link",
+    "not_a_pdf": "that link didn't return an actual PDF",
+}
+
+
+def _friendly_extraction_reason(error: str | None) -> str:
+    """Map an extraction_error's leading code to a short, honest, non-technical
+    phrase - the raw error strings are precise but not fit for a chat message
+    (multi-paragraph YouTube errors, etc.), and previously every failure showed
+    the same generic text regardless of the real cause."""
+    if not error:
+        return "couldn't process this link"
+    code = error.split(":", 1)[0].strip()
+    return _FRIENDLY_EXTRACTION_REASONS.get(code, "couldn't process this link")
+
+
 def _notify_extraction_failed(item: SavedItem) -> None:
     """Bonus UX item (prdv2.md, bottom section): if a link later fails
     extraction, follow up in Telegram instead of only reflecting it
@@ -62,8 +88,9 @@ def _notify_extraction_failed(item: SavedItem) -> None:
         return
 
     title = (item.title or item.url)[:60]
+    reason = _friendly_extraction_reason(item.extraction_error)
     text = (
-        f"⚠️ Couldn't fully process \"{title}\" — likely paywalled or no captions available. "
+        f"⚠️ Couldn't process \"{title}\" — {reason}. "
         "You can still open the original link from your dashboard."
     )
     try:
