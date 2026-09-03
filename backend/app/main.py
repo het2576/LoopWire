@@ -51,7 +51,8 @@ async def lifespan(app: FastAPI):
         await telegram_app.initialize()
         await telegram_app.start()
 
-        webhook_url = f"{settings.backend_base_url}/telegram-webhook"
+        backend_base = settings.backend_base_url.rstrip("/")
+        webhook_url = f"{backend_base}/telegram-webhook"
         if not webhook_url.startswith("https://"):
             # Telegram rejects non-HTTPS webhook URLs outright. This is the
             # expected case for plain local dev (BACKEND_BASE_URL defaults to
@@ -90,9 +91,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Loopwire API", lifespan=lifespan)
 
+dashboard_origin = settings.dashboard_base_url.rstrip("/")
+allowed_origins = [dashboard_origin, f"{dashboard_origin}/"] if dashboard_origin else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.dashboard_base_url],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

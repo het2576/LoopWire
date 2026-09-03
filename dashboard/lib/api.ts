@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 const INTERNAL_AUTH_SECRET = process.env.INTERNAL_AUTH_SECRET ?? "";
 
 export type LoopwireItem = {
@@ -103,7 +103,10 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T | nu
       return null;
     }
     return (await res.json()) as T;
-  } catch (err) {
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && "digest" in err && (err as { digest?: string }).digest === "DYNAMIC_SERVER_USAGE") {
+      throw err;
+    }
     console.error(`[LoopWire API] ${init.method ?? "GET"} ${url} → network/parse error:`, err);
 
     return null;

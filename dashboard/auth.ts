@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import type { JWT } from "next-auth/jwt";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 const INTERNAL_AUTH_SECRET = process.env.INTERNAL_AUTH_SECRET ?? "";
 
 // Module augmentation of next-auth's subpath exports (`next-auth/jwt`,
