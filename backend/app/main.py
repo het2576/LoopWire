@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from telegram import Update
 from telegram.ext import Application
@@ -103,6 +104,18 @@ app.include_router(api_router)
 def health():
     return {"ok": True}
 
+
+@app.get("/db-ping")
+def db_ping(db: Session = Depends(get_db)):
+    """Keeps Supabase free-tier from pausing by making a real DB query.
+    Hit this via an external cron (e.g. cron-job.org) every 5-6 days.
+    The /health endpoint does NOT touch the DB so it won't prevent pausing."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {"ok": True, "db": "reachable"}
+    except Exception as e:
+        logger.error("db-ping failed: %s", e)
+        return {"ok": False, "db": "unreachable", "error": str(e)}
 
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):

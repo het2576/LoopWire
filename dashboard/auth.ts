@@ -26,10 +26,25 @@ async function upsertUser(email: string, googleId: string): Promise<string | nul
       body: JSON.stringify({ email, google_id: googleId }),
       cache: "no-store",
     });
+<<<<<<< HEAD
     if (!res.ok) return null;
     const data = await res.json();
     return String(data.id);
   } catch {
+=======
+    if (!res.ok) {
+      let body = "(unreadable)";
+      try { body = await res.text(); } catch { /* ignore */ }
+      console.error(
+        `[NextAuth] upsertUser failed: POST ${BACKEND_URL}/api/auth/upsert-user → ${res.status} ${res.statusText}\nBody: ${body}\nCheck INTERNAL_AUTH_SECRET matches on both Vercel and Render, and NEXT_PUBLIC_BACKEND_URL points to the correct backend.`
+      );
+      return null;
+    }
+    const data = await res.json();
+    return String(data.id);
+  } catch (err) {
+    console.error(`[NextAuth] upsertUser network/parse error: ${err}\nBackend URL attempted: ${BACKEND_URL}/api/auth/upsert-user`);
+>>>>>>> 9c2814d (updated backend code and add db-ping endpoint for the cron job)
     return null;
   }
 }

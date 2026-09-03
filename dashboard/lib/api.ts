@@ -75,7 +75,17 @@ export type ProfileStatus = {
  * Never called from a client component (the secret would leak to the browser). */
 async function authHeaders(): Promise<Record<string, string>> {
   const session = await auth();
+<<<<<<< HEAD
   if (!session?.user?.id) return {};
+=======
+  if (!session?.user?.id) {
+    console.error("[LoopWire API] authHeaders: no session or user id found — user may not be signed in");
+    return {};
+  }
+  if (!INTERNAL_AUTH_SECRET) {
+    console.error("[LoopWire API] authHeaders: INTERNAL_AUTH_SECRET env var is not set on this Next.js server");
+  }
+>>>>>>> 9c2814d (updated backend code and add db-ping endpoint for the cron job)
   return {
     "X-Internal-Secret": INTERNAL_AUTH_SECRET,
     "X-User-Id": String(session.user.id),
@@ -83,12 +93,30 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T | null> {
+<<<<<<< HEAD
   try {
     const headers = { ...(await authHeaders()), ...(init.headers as Record<string, string>) };
     const res = await fetch(`${BACKEND_URL}${path}`, { ...init, headers, cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
+=======
+  const url = `${BACKEND_URL}${path}`;
+  try {
+    const headers = { ...(await authHeaders()), ...(init.headers as Record<string, string>) };
+    const res = await fetch(url, { ...init, headers, cache: "no-store" });
+    if (!res.ok) {
+      let body = "(unreadable)";
+      try { body = await res.text(); } catch { /* ignore */ }
+      console.error(
+        `[LoopWire API] ${init.method ?? "GET"} ${url} → ${res.status} ${res.statusText}\nResponse body: ${body}`
+      );
+      return null;
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    console.error(`[LoopWire API] ${init.method ?? "GET"} ${url} → network/parse error:`, err);
+>>>>>>> 9c2814d (updated backend code and add db-ping endpoint for the cron job)
     return null;
   }
 }
