@@ -203,21 +203,33 @@ needed.
    needs to know the Next.js app isn't at the repo root).
 3. Framework preset should auto-detect as Next.js; leave build/output
    settings default.
-4. Before the first deploy, add these **Environment Variables** (Production,
-   and Preview if you want PRs to build too):
-   - `NEXT_PUBLIC_BACKEND_URL` = your Render URL from section 8
-     (`https://loopwire-api-xxxx.onrender.com`)
+4. Before the first deploy, add these **Environment Variables** (check Production,
+   and Preview/Development as needed):
+   - `NEXT_PUBLIC_BACKEND_URL` = your Render backend URL from section 8
+     (`https://loopwire-api-xxxx.onrender.com` — **do NOT include a trailing slash**)
    - `AUTH_SECRET` = generate with `npx auth secret` or
      `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-   - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` = your Google OAuth client
-     credentials (see section 10 below if you don't have production ones yet)
+   - `AUTH_TRUST_HOST` = `true` (required by NextAuth v5 on Vercel to avoid `UntrustedHost` errors during sign-in)
+   - `AUTH_GOOGLE_ID` = your Google OAuth Client ID
+   - `AUTH_GOOGLE_SECRET` = your Google OAuth Client Secret
    - `INTERNAL_AUTH_SECRET` = the **exact same value** you set on Render in
      step 8.4 — this is the shared secret the two services use to trust each
-     other; a mismatch here fails silently as 401s on every dashboard page.
+     other; a mismatch here fails as 401s on dashboard API calls. Ensure there
+     are no accidental leading or trailing spaces.
 5. Deploy. Vercel assigns a stable URL immediately, e.g.
-   `https://loopwire.vercel.app` (or your own custom domain if you attach one).
+   `https://loopwire.vercel.app` (or your custom domain).
 6. Go back to Render and set `DASHBOARD_BASE_URL` to this Vercel URL (step
-   8.6) so CORS allows the dashboard to call the API.
+   8.6) **without a trailing slash** (e.g. `https://loopwire.vercel.app`),
+   so CORS allows the dashboard to call the API.
+7. Complete **Section 10** below immediately to add the Vercel redirect URI
+   in Google Cloud Console, otherwise Google sign-in will fail with `redirect_uri_mismatch`.
+8. **Verify deployment health**:
+   Visit `https://<your-vercel-domain>/api/debug` in your browser. This built-in
+   diagnostic endpoint verifies that:
+   - All environment variables are loaded properly.
+   - The backend `/health` endpoint is reachable from Vercel.
+   - Your session and internal auth token are valid.
+
 
 ## 10. Google Cloud Console — production OAuth redirect URI
 
