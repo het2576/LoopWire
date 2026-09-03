@@ -11,12 +11,10 @@ async function saveProfile(formData: FormData) {
 async function generateCode() {
   "use server";
   const result = await createConnectionCode();
-<<<<<<< HEAD
-=======
   if (!result) {
     console.error("[Settings] generateCode: createConnectionCode returned null — check Vercel and Render env vars (INTERNAL_AUTH_SECRET, NEXT_PUBLIC_BACKEND_URL)");
   }
->>>>>>> 9c2814d (updated backend code and add db-ping endpoint for the cron job)
+
   redirect(result ? `/settings?code=${result.code}` : "/settings?code_error=1");
 }
 
@@ -94,11 +92,6 @@ export default async function SettingsPage({
               </div>
             )}
             {code_error && (
-<<<<<<< HEAD
-              <p className="mt-3 font-mono text-[12px] text-alert">
-                Couldn&apos;t generate a code — try again in a moment.
-              </p>
-=======
               <div className="mt-3 rounded-md border border-alert/40 bg-alert/10 px-4 py-3">
                 <p className="font-mono text-[12px] font-semibold text-alert">
                   Couldn&apos;t generate a code — try again in a moment.
@@ -111,7 +104,7 @@ export default async function SettingsPage({
                   {" "}See <a href="/api/debug" target="_blank" className="underline">diagnostic info</a>.
                 </p>
               </div>
->>>>>>> 9c2814d (updated backend code and add db-ping endpoint for the cron job)
+
             )}
 
             <form action={generateCode} className="mt-4">
