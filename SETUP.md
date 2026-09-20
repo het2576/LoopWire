@@ -160,6 +160,52 @@ processing (this), and delivery (section 6) - is driven by HTTP calls to one
 Render web service. No background worker, no always-on process, no paid tier
 needed.
 
+## 7b. Keeping the database awake: the /db-ping cron (do not skip)
+
+**Supabase pauses a free-tier project after 7 consecutive days of no
+database activity.** A paused project refuses every connection, and because
+of how this app is wired that failure is close to invisible from the outside:
+
+- `/health` never touches the database, so Render's health check stays green
+  and the service still looks "live".
+- Every Telegram handler opens a DB session as its first action, so a paused
+  database means the bot raises before it can reply — you get **total silence
+  from the bot**, not an error message.
+- `/send-digest` and `/process-pending` fail for the same reason, so **no
+  email goes out** and nothing gets processed.
+
+In other words: bot silent + no dispatch email + dashboard empty, with a
+backend that still answers `/health`, is the signature of a paused (or
+otherwise unreachable) database — not of a crashed service.
+
+The `/db-ping` endpoint exists to prevent that and to alarm when it happens
+anyway. It runs a real `SELECT 1`, which counts as activity and resets
+Supabase's 7-day idle timer.
+
+1. In cron-job.org, **create a third cronjob**:
+   - URL: `https://<your-render-url>/db-ping`
+   - Schedule: once a day (any time). Daily gives you 6 days of margin
+     against the 7-day pause window — don't cut it close with a 5-6 day
+     schedule, because a single missed run then pauses the project.
+   - Request method: `GET` (no secret needed; it exposes nothing)
+   - Turn **on** cron-job.org's failure notifications for this job.
+2. Test it: `curl -i "https://<your-render-url>/db-ping"`
+   - Healthy: `200` + `{"ok": true, "db": "reachable"}`
+   - Database down/paused: `503` + `{"ok": false, "db": "unreachable", ...}`
+
+The 503 is the point — cron-job.org and every uptime monitor decide
+pass/fail from the HTTP status code, so this job goes red and emails you the
+moment the database becomes unreachable, instead of you finding out days
+later because your dispatch never arrived.
+
+> Note: the two crons in sections 6 and 7 also touch the database, so while
+> they're running they keep Supabase awake on their own. That's exactly why
+> this is easy to get wrong — if those jobs ever stop (cron-job.org
+> auto-disables a job after repeated failures, e.g. during a Render outage or
+> after a secret rotation), the database goes idle, Supabase pauses it 7 days
+> later, and the whole pipeline goes quiet. This dedicated job is the
+> backstop, and its alert is how you hear about it.
+
 ## 8. Deploying the backend to Render
 
 1. Push this repo to GitHub (Render deploys from a git remote, not a local

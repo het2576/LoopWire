@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from telegram import Update
@@ -111,15 +111,34 @@ def health():
 
 @app.get("/db-ping")
 def db_ping(db: Session = Depends(get_db)):
-    """Keeps Supabase free-tier from pausing by making a real DB query.
-    Hit this via an external cron (e.g. cron-job.org) every 5-6 days.
-    The /health endpoint does NOT touch the DB so it won't prevent pausing."""
+    """Readiness probe: keeps the Supabase free tier from pausing by making a
+    real DB query, and doubles as the only external signal that the database
+    is actually reachable. Hit this via an external cron (e.g. cron-job.org)
+    every 5-6 days - more often is fine and costs nothing.
+
+    /health deliberately does NOT touch the DB: it stays a pure liveness probe
+    so Render's health check doesn't cycle the service on a transient Supabase
+    blip. That split means /health alone cannot tell you the app is working -
+    this endpoint is the one to alert on.
+
+    Returns 503 (not 200) when the DB is unreachable. This matters: cron/uptime
+    monitors decide success from the HTTP status, so returning 200 with
+    {"ok": false} - as this did before - meant a paused Supabase project looked
+    like a passing check and nothing ever alarmed.
+    """
     try:
         db.execute(text("SELECT 1"))
         return {"ok": True, "db": "reachable"}
     except Exception as e:
-        logger.error("db-ping failed: %s", e)
-        return {"ok": False, "db": "unreachable", "error": str(e)}
+        # Full detail to the logs only. The response stays generic because this
+        # route is unauthenticated, and SQLAlchemy connection errors routinely
+        # echo back the DSN (host, user, sometimes credentials).
+        logger.exception("db-ping failed - database unreachable")
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "db": "unreachable", "error": type(e).__name__},
+        )
+
 
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):

@@ -595,6 +595,37 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # ── Application setup ─────────────────────────────────────────────────────────
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all so a broken dependency never leaves the user staring at silence.
+
+    Every handler below opens a DB session as its first action (_resolve_user),
+    so if Postgres is unreachable - a paused Supabase free-tier project is the
+    usual cause - the handler raises before it ever calls reply_text. With no
+    error handler registered, python-telegram-bot just logs the exception and
+    the webhook still returns 200, so Telegram is satisfied and the person
+    forwarding links sees nothing at all. That failure mode is indistinguishable
+    from "the bot is dead", which makes it needlessly hard to diagnose.
+
+    Replying here turns a silent outage into a visible one. The message stays
+    deliberately vague - the real traceback goes to the logs, not to the chat.
+    """
+    logger.exception("Unhandled error while processing update: %s", update, exc_info=context.error)
+
+    message = getattr(update, "effective_message", None)
+    if message is None:
+        return
+    try:
+        await message.reply_text(
+            "⚠️ Something broke on my end and I couldn't handle that. "
+            "Your link was NOT saved - please send it again in a few minutes. "
+            "If this keeps happening the backend or its database is likely down."
+        )
+    except Exception:
+        # The reply itself can fail (bot blocked, chat deleted, Telegram down).
+        # Never let the error handler raise - that would mask the original error.
+        logger.exception("Failed to deliver the error notice to the user")
+
+
 def build_application() -> Application:
     settings = get_settings()
     if not settings.telegram_bot_token:
@@ -613,6 +644,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("setprofile", set_profile))
     application.add_handler(CommandHandler("stats", show_stats))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_error_handler(on_error)
     return application
 
 

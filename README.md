@@ -230,7 +230,8 @@ Served by `backend/app/main.py` + `backend/app/routers/api.py`.
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/health` | liveness check |
+| `GET` | `/health` | liveness check — deliberately does **not** touch the DB, so a green `/health` does not mean the app is working |
+| `GET` | `/db-ping` | readiness check — runs a real `SELECT 1`; keeps the Supabase free tier from pausing and returns **503** when the DB is unreachable. This is the one to alert on |
 | `POST` | `/telegram-webhook` | receives Telegram updates (registered automatically on startup); validates `X-Telegram-Bot-Api-Secret-Token` |
 | `POST` | `/process-pending?key=<secret>` | one extraction + summarization pass over pending items — fails closed if `PROCESS_PENDING_SECRET` unset |
 | `POST` | `/send-digest?key=<secret>` | build + send a dispatch on demand — fails closed if `SEND_LOOPWIRE_SECRET` unset |
