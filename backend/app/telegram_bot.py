@@ -26,6 +26,7 @@ ngrok, `main()` below still runs it in long-polling mode standalone:
     uv run python -m app.telegram_bot
 """
 
+import asyncio
 import datetime as dt
 import logging
 import re
@@ -57,11 +58,27 @@ from app.models import (
     User,
 )
 from app.url_utils import classify_url, find_first_url
+from app.worker import run_process_pending_cycle
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("loopwire.telegram_bot")
 
 CONNECTION_CODE_TTL_MINUTES = 15
+_processing_user_ids: set[int] = set()
+
+
+async def _process_user_queue(user_id: int) -> None:
+    """Start a best-effort pass after a link arrives; scheduled runs remain
+    the durable fallback if Render restarts while a pass is underway."""
+    if user_id in _processing_user_ids:
+        return
+    _processing_user_ids.add(user_id)
+    try:
+        await asyncio.to_thread(run_process_pending_cycle, user_id=user_id)
+    except Exception:
+        logger.exception("Automatic processing failed for user %s", user_id)
+    finally:
+        _processing_user_ids.discard(user_id)
 
 # ── Status display ────────────────────────────────────────────────────────────
 
@@ -326,6 +343,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "Use /list to check status\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
+        asyncio.create_task(_process_user_queue(user.id))
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -52,8 +52,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, account, profile }) {
       const t = token as LoopwireToken;
-      // account/profile are only present on the initial sign-in request,
-      // not on subsequent token refreshes - upsert exactly once per login.
+      // Provision once during the OAuth callback. Retrying a failed backend
+      // write on every page request turns ordinary navigation into a slow
+      // network operation; the user can sign in again after the backend is
+      // healthy to provision their account.
       if (account && profile?.sub && t.email) {
         const userId = await upsertUser(t.email, profile.sub);
         if (userId !== null) {

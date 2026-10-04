@@ -118,13 +118,15 @@ def _run_extractor(item: SavedItem) -> dict:
     return extract_article(item.url)  # default: article
 
 
-def process_pending_extraction(db) -> dict:
-    items = (
+def process_pending_extraction(db, user_id: int | None = None) -> dict:
+    query = (
         db.query(SavedItem)
         .filter(SavedItem.status == STATUS_PENDING)
         .filter(SavedItem.type.in_(EXTRACTABLE_TYPES))
-        .all()
     )
+    if user_id is not None:
+        query = query.filter(SavedItem.user_id == user_id)
+    items = query.all()
 
     failed = 0
     for item in items:
@@ -151,8 +153,11 @@ def process_pending_extraction(db) -> dict:
     return {"attempted": len(items), "failed": failed}
 
 
-def process_pending_summarization(db) -> int:
-    items = db.query(SavedItem).filter(SavedItem.status == STATUS_EXTRACTED).all()
+def process_pending_summarization(db, user_id: int | None = None) -> int:
+    query = db.query(SavedItem).filter(SavedItem.status == STATUS_EXTRACTED)
+    if user_id is not None:
+        query = query.filter(SavedItem.user_id == user_id)
+    items = query.all()
 
     for item in items:
         logger.info("Summarizing item #%s: %s", item.id, item.title or item.url)
@@ -189,14 +194,14 @@ def process_pending_summarization(db) -> int:
     return len(items)
 
 
-def run_process_pending_cycle() -> dict:
+def run_process_pending_cycle(user_id: int | None = None) -> dict:
     """Runs one extraction + summarization pass and returns stats. Shared by
     the standalone polling loop below (local dev / self-hosted always-on
     deployments) and the HTTP-triggered POST /process-pending endpoint in
     app/main.py, which is what production relies on - see SETUP.md."""
     with SessionLocal() as db:
-        extraction = process_pending_extraction(db)
-        summarized = process_pending_summarization(db)
+        extraction = process_pending_extraction(db, user_id=user_id)
+        summarized = process_pending_summarization(db, user_id=user_id)
     return {
         "processed": extraction["attempted"],
         "failed": extraction["failed"],

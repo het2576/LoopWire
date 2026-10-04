@@ -10,6 +10,7 @@ from app.db import get_db
 from app.engagement import get_stats, log_event
 from app.models import COLD_START_ENGAGEMENT_THRESHOLD, EVENT_OPENED, ConnectionCode, LoopwireSend, SavedItem, User
 from app.personalization import is_cold_start, total_engagement_count
+from app.worker import run_process_pending_cycle
 from app.schemas import (
     ConnectionCodeOut,
     InterestProfileOut,
@@ -142,6 +143,16 @@ def list_items(
         )
         for item in items
     ]
+
+
+@router.post("/items/process")
+def process_my_items(current_user: User = Depends(get_current_user)):
+    """Process only the signed-in user's queue on demand.
+
+    The scheduled worker remains the durable production fallback, while this
+    gives a reader a direct recovery path if an external cron run was missed.
+    """
+    return run_process_pending_cycle(user_id=current_user.id)
 
 
 @router.post("/items/{item_id}/opened")

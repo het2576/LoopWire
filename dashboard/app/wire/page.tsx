@@ -1,5 +1,6 @@
 import Link from "next/link";
 import EmptyState from "@/components/EmptyState";
+import ProcessQueueButton from "@/components/ProcessQueueButton";
 import WireRow from "@/components/WireRow";
 import { listItems } from "@/lib/api";
 
@@ -42,6 +43,13 @@ export default async function WirePage({
           );
         })}
       </div>
+
+      {items?.some((item) => item.status === "pending") && (
+        <div className="mb-6 rounded-[18px] border border-ink/10 bg-paper/70 p-4 sm:flex sm:items-center sm:justify-between sm:gap-6">
+          <div className="mb-3 sm:mb-0"><p className="font-mono text-sm font-semibold text-ink">A link is still in the queue</p><p className="mt-1 text-[12px] leading-relaxed text-wire">Run a processing pass now instead of waiting for the scheduled worker.</p></div>
+          <ProcessQueueButton />
+        </div>
+      )}
 
       {!items || items.length === 0 ? (
         <EmptyState>
