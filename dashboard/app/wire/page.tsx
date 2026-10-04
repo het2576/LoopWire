@@ -21,12 +21,9 @@ export default async function WirePage({
 
   return (
     <div>
-      <h1 className="mb-2 font-mono text-2xl font-bold tracking-tight text-signal">THE WIRE</h1>
-      <p className="mb-6 text-[13px] text-wire">
-        Every link you&apos;ve ever forwarded, live — not just the ones already sent.
-      </p>
+      <div className="mb-8 grid gap-5 sm:mb-10 sm:grid-cols-[1fr_auto] sm:items-end"><div><p className="page-kicker">Your incoming queue</p><h1 className="page-title mt-3">Everything you saved.</h1><p className="page-intro mt-4">Follow each link from first save to its place in a briefing.</p></div><div className="hidden max-w-44 text-sm leading-relaxed text-wire sm:block">The queue updates as your links are processed.</div></div>
 
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-6 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
         {FILTERS.map((f) => {
           const active = (status ?? undefined) === f.value;
           const href = f.value ? `/wire?status=${f.value}` : "/wire";
@@ -34,10 +31,10 @@ export default async function WirePage({
             <Link
               key={f.label}
               href={href}
-              className={`rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+              className={`min-h-11 shrink-0 rounded-full px-3.5 py-2 text-[12px] font-semibold transition-colors ${
                 active
-                  ? "border-signal bg-signal/10 text-signal"
-                  : "border-white/15 text-wire hover:border-white/30 hover:text-paper"
+                  ? "bg-ink-deep text-white shadow-sm"
+                  : "bg-paper text-wire hover:bg-white/12 hover:text-mint"
               }`}
             >
               {f.label}
@@ -53,9 +50,9 @@ export default async function WirePage({
             : "Nothing on the wire yet. Forward a link to your Telegram bot to start filling the queue."}
         </EmptyState>
       ) : (
-        <ul className="border-t border-white/10">
-          {items.map((item, index) => (
-            <WireRow key={item.item_id} item={item} index={index} />
+        <ul className="overflow-hidden rounded-[20px] border border-ink/7 bg-paper shadow-[0_10px_26px_rgba(27,35,69,0.045)]">
+          {items.map((item) => (
+            <WireRow key={item.item_id} item={item} />
           ))}
         </ul>
       )}

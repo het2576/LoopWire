@@ -25,21 +25,12 @@ function GoogleLogo() {
 
 export default function SignInPage() {
   return (
-    <div className="flex flex-1 items-center justify-center px-4">
-      <div className="slip teletype-in w-full max-w-sm bg-paper p-8 text-center text-ink shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] sm:p-10">
-        <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full border border-ink/15">
-          <span className="h-1.5 w-1.5 rounded-full bg-signal signal-dot" aria-hidden />
-        </div>
-        <div className="mt-4 font-mono text-xs font-semibold uppercase tracking-[0.2em] text-ink/50">
-          Loopwire
-        </div>
-        <h1 className="mt-2 font-mono text-2xl font-bold tracking-tight">Sign in to your wire</h1>
-        <p className="mt-3 text-[14px] leading-relaxed text-ink/70">
-          Your saved links, extracted and summarized, delivered as a dispatch — tied to your own account.
-        </p>
+    <div className="mx-auto grid min-h-[calc(100vh-15rem)] max-w-5xl items-center gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+      <div><p className="page-kicker">Your own corner of the internet</p><h1 className="page-title mt-4">Save the link.<br />Keep the thought.</h1><p className="page-intro mt-6">Loopwire turns the interesting things you find into a brief you will actually want to return to.</p><div className="mt-8 flex flex-wrap gap-3 text-[12px] font-medium text-wire"><span className="rounded-full bg-paper px-3 py-2">Personal summaries</span><span className="rounded-full bg-paper px-3 py-2">Telegram capture</span></div></div>
+      <div className="paper-sheet text-ink"><div className="px-7 py-8 sm:px-10 sm:py-10"><p className="font-mono text-lg font-semibold tracking-[-0.05em]">Start your reading space</p><p className="mt-3 text-[14px] leading-relaxed text-ink/65">Sign in once, then send links to Telegram whenever inspiration strikes.</p>
 
         <form
-          className="mt-7"
+          className="mt-6"
           action={async () => {
             "use server";
             await signIn("google", { redirectTo: "/" });
@@ -47,7 +38,7 @@ export default function SignInPage() {
         >
           <button
             type="submit"
-            className="group inline-flex w-full items-center justify-center gap-3 rounded-md bg-ink px-5 py-3 font-mono text-[13px] font-semibold tracking-wide text-paper transition-all hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal active:scale-[0.98]"
+            className="group inline-flex w-full items-center justify-center gap-3 rounded-xl bg-ink-deep px-5 py-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-signal"
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-paper">
               <GoogleLogo />
@@ -58,7 +49,7 @@ export default function SignInPage() {
 
         <div className="mt-7 flex items-center gap-3 text-ink/30">
           <div className="h-px flex-1 bg-ink/10" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.15em]">Before you begin</span>
+          <span className="text-[10px] font-medium">What happens next</span>
           <div className="h-px flex-1 bg-ink/10" />
         </div>
 
@@ -68,7 +59,7 @@ export default function SignInPage() {
         <p className="mt-2 text-[12px] leading-relaxed text-ink/45">
           Some paywalled articles or videos without captions can&apos;t be summarized — you&apos;ll see them flagged, not silently dropped.
         </p>
-      </div>
+      </div></div>
     </div>
   );
 }

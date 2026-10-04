@@ -1,8 +1,10 @@
 # Loopwire Setup
 
-Everything below is a one-time setup to get your own credentials. None of these
-need to happen before the code works locally against SQLite for testing, but
-you'll need all of them for the real Telegram → Supabase → Gemini → Resend flow.
+Everything below is a one-time setup to get your own credentials. The current
+data model uses PostgreSQL array columns for interest embeddings, so local
+development needs either a local PostgreSQL database or a Supabase PostgreSQL
+connection; SQLite is not supported. You'll need the rest of the credentials
+for the real Telegram → Supabase → Gemini → Resend flow.
 
 ## 1. Supabase (database)
 
@@ -332,6 +334,14 @@ hanging or crashing; everything else (articles, GitHub, Reddit, HN, PDFs)
 is unaffected either way.
 
 ## Running everything locally
+
+Before starting the backend, copy `backend/.env.example` to `backend/.env` and
+set a real PostgreSQL/Supabase `DATABASE_URL`. Set `INTERNAL_AUTH_SECRET` there
+to the same value used by `dashboard/.env.local`; this is what lets the
+dashboard securely act for a signed-in user. The generated `dashboard/.env.local`
+already contains the local Auth.js secret, backend URL, and a matching internal
+secret. Add `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` there before testing the
+Google sign-in button.
 
 From `backend/`:
 ```bash

@@ -6,16 +6,16 @@ export default async function ProfileStatusBadge() {
 
   return (
     <div
-      className={`mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[11px] tracking-wide ${
-        status.is_adaptive ? "border-ok/40 text-ok" : "border-wire/30 text-wire"
+      className={`mb-6 flex w-fit max-w-full items-center gap-2 rounded-full px-3 py-2 text-[12px] font-medium leading-snug ${
+        status.is_adaptive ? "bg-ok/10 text-ok" : "bg-mint/25 text-ink"
       }`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${status.is_adaptive ? "bg-ok signal-dot" : "bg-wire"}`} aria-hidden />
       {status.is_adaptive ? (
-        "ADAPTIVE DIGEST ACTIVE"
+        "Digest adapts to your reading"
       ) : (
         <>
-          STATIC DIGEST &middot; {status.engagement_count}/{status.threshold} INTERACTIONS UNTIL DIGESTS ADAPT TO YOU
+          {status.engagement_count}/{status.threshold} interactions before the digest adapts
         </>
       )}
     </div>

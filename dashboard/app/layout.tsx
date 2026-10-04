@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { DM_Sans, Space_Grotesk } from "next/font/google";
 import Nav from "@/components/Nav";
 import "./globals.css";
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
 });
 
-const plexSans = IBM_Plex_Sans({
-  variable: "--font-plex-sans",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -20,19 +20,25 @@ export const metadata: Metadata = {
   description: "Your saved links, wired back to you as a Loopwire send.",
 };
 
+const themeBootScript = `(() => { try { const saved = localStorage.getItem('loopwire-theme'); const theme = saved === 'dark' || saved === 'light' ? saved : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); document.documentElement.dataset.theme = theme; } catch {} })();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${plexMono.variable} ${plexSans.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-ink text-paper">
-        <Nav />
-        <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-10 sm:px-8">{children}</main>
-        <footer className="mx-auto w-full max-w-2xl px-5 pb-10 font-mono text-[11px] tracking-widest text-wire/70 sm:px-8">
-          END OF TRANSMISSION
-        </footer>
+    <html lang="en" suppressHydrationWarning className={`${spaceGrotesk.variable} ${dmSans.variable} h-full antialiased`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
+      <body className="min-h-full bg-cloud text-ink">
+        <div className="app-shell min-h-screen">
+          <Nav />
+          <main className="content-frame px-4 pt-7 sm:px-8 sm:pt-14 lg:px-12">
+            <div className="mx-auto max-w-[1180px]">{children}</div>
+          </main>
+        </div>
       </body>
     </html>
   );
