@@ -39,7 +39,7 @@ aren't in this repo, but every decision they drove is documented below.
 1. **Sign in** — Google sign-in, one account per person. Your data is yours alone; see [Phase A](#phase-a-multi-tenant--auth).
 2. **Ingest** — forward any link to your Telegram bot (once linked to your account). Saved instantly, no per-link setup.
 3. **Extract** — an on-demand pass (every 5-10 min, no always-on process) pulls clean article text (`trafilatura`) or video transcripts (`youtube-transcript-api`).
-4. **Summarize** — Gemini 2.5 Flash writes a grounded 2-3 sentence summary — never padded, never hallucinated. Failed/thin extractions are shown honestly instead of a made-up summary.
+4. **Summarize** — Gemini 3.5 Flash-Lite writes a grounded ≤3-sentence summary from the *whole* document, treating page text as untrusted data. Claim-level faithfulness is measured, not asserted: **0.955** on the eval set (see [Verification](#verification)). Paywalled, dead and blocked links are reported with their real reason instead of a made-up summary.
 5. **Rank & explain** — items are ordered by similarity to what you've actually opened and clicked (not a static bio), with a relevance note naming the specific past item it resembles once there's enough history — see [Phase B](#phase-b-adaptive-personalization-the-actual-differentiator).
 6. **Deliver** — once a day (configurable), everything ranked since your last dispatch is bundled and sent by email *and* posted to your web dashboard.
 7. **Log engagement** — every dispatch item's opens and click-throughs are recorded — the data Phase B's ranking runs on.
@@ -69,7 +69,7 @@ Gemini call against real extracted article text.
 >
 > **Relevance note:** This content offers practical advice on how to approach ambitious projects and personal development, aligning with the user's interest in product building and practical productivity/personal systems.
 >
-> **Estimated read time:** 15 min
+> **Estimated read time:** 50 min *(computed from the 11,826-word count; v1 asked the LLM, which saw only the first 24k characters and said "15 min")*
 
 Regenerate against any URL: `uv run python scripts/demo_summary.py <url>` (needs `GEMINI_API_KEY`).
 
@@ -113,7 +113,8 @@ anytime on the dashboard's **Wire** page (`/wire`) or via `/list` in Telegram.
 | `/list` | Last 10 saved items + status (⏳ pending, 📄 extracted, ⚠️ extraction failed, ✅ summarized, 📬 sent) |
 | `/profile` | Shows the current interest profile text |
 | `/setprofile <text>` | Replaces the interest profile with a plain-English description of your interests — never a link |
-| `/stats` | Engagement rates (opened/clicked/skipped) by content type |
+| `/stats` | Engagement by content type: clicks, 👍/👎, skips |
+| `/quiz` | Active recall: a question about something you read; reply with your answer and it's graded and rescheduled |
 
 **Getting your dispatch**: a scheduled cron job (cron-job.org, free) pings
 `POST /send-digest?key=<secret>` on your chosen schedule, which builds and
@@ -151,25 +152,28 @@ bio you wrote once and never updated.
 1. Every summarized item is embedded (`gemini-embedding-001`, truncated to
    768 dimensions) and stored alongside it — a Postgres array column plus
    cosine similarity in Python, no separate vector database.
-2. Before each dispatch, an **interest vector** is recomputed as a weighted
-   average of engaged items' embeddings: clicking through counts double,
-   opening without clicking counts once, an inferred skip is *subtracted* —
-   so a consistently-skipped topic actively pulls the ranking away, not just
-   gets ignored.
-3. Pending items are ranked by cosine similarity to that vector — highest
-   affinity first, not chronological order.
-4. If a new item is strongly similar (≥ 0.82 cosine similarity) to something
-   you've engaged with before, its relevance note is regenerated to name that
-   item directly (*"Similar to 'How to Do Great Work', which you read
-   recently"*) instead of guessing from a static bio.
+2. Before each dispatch, an **interest vector** is recomputed from item-level
+   signals only: 👍 (+2), click-through (+1), 👎 (−1.5), and a skip (−0.3)
+   inferred *only* for dispatches you're known to have opened. Signals decay
+   with a 45-day half-life. There is deliberately no per-item "opened" event:
+   v1 had one tracking pixel per item (and marked every item opened on
+   dashboard load), so "opened" meant "was sent" and the vector converged to
+   the average of everything — the ranking eval shows v1 got *worse* than no
+   learning at all.
+3. Items are scored by a **blend**: `a·cos(item, history) + (1−a)·cos(item, profile)`
+   with `a = n/(n+3)` for `n` positive signals — no hard cold-start switch.
+   Failed items always sort last. Optionally one off-profile item is promoted
+   to slot 3 (labeled as such) so the dispatch can't collapse onto one topic.
+4. If a new item is very similar (≥ 0.82 cosine) to something you clicked or
+   upvoted, its relevance note names it (*"Similar to 'How to Do Great Work',
+   which you clicked through to"*). The threshold is calibrated: precision
+   1.00 on the eval corpus, at the cost of firing rarely.
 
-**Cold-start, honestly stated**: below **15 total engagement events**, a
-computed vector is too noisy to trust, so ranking falls back to an embedding
-of your static interest profile text (`/setprofile`). The dashboard and email
-footer both show exactly where you stand — *"Static digest · 4/15
-interactions until digests adapt to you"* or *"Adaptive digest active"* once
-cleared. **Loopwire is deliberately unremarkable on day one** — it sharpens
-with use rather than arriving personalized out of the box, by design.
+**Cold-start, honestly stated**: with zero signals ranking uses your written
+profile (`/setprofile`); each click or rating shifts weight toward real
+behavior, and at 3 signals history and profile weigh equally — the point the
+dashboard and email call "adaptive". The email footer says exactly how the
+dispatch was ordered.
 
 Verified with a real test, not just implemented — see [Verification](#verification).
 
@@ -186,7 +190,7 @@ flowchart LR
     PP -->|YouTube/Reddit/GitHub/HN/PDF| EX2[app/extraction.py]
     EX1 --> DB
     EX2 --> DB
-    PP -->|extracted content + interest profile| SUM[Gemini 2.5 Flash<br/>app/summarize.py]
+    PP -->|extracted content + interest profile| SUM[Gemini 3.5 Flash-Lite<br/>app/summarize.py]
     SUM -->|summary + relevance_note| DB
 
     CRONS[cron-job.org, daily] -->|POST /send-digest?key=...| SENDEP[app/main.py]
@@ -218,7 +222,8 @@ cron setup.
 | Ingestion | Telegram Bot API (`python-telegram-bot`, webhook mode) | no always-on process — Telegram pushes to `/telegram-webhook`, fits Render's free tier |
 | Processing / Scheduling | External cron (cron-job.org, free) pinging `/process-pending` and `/send-digest` | replaces always-on polling/scheduling; a ping also wakes a spun-down free service |
 | Extraction | `trafilatura` (articles), `youtube-transcript-api` + oEmbed, plus Reddit/GitHub/HN/PDF extractors | free, no auth, fail explicitly rather than guess |
-| Summarization | Gemini 2.5 Flash, structured JSON output | generous free tier, strong long-context handling |
+| Summarization | Gemini 3.5 Flash-Lite via one client (`app/llm.py`: retries honoring `retryDelay`, timeouts, per-call token/latency tracing) | 2.5 Flash is deprecated (routes to 3.5 Flash-Lite from 2026-12-01); cheap, long-context |
+| Evals | `backend/evals/`: live extraction set, LLM-judged summary A/B, recall-grader labels, closed-loop ranking simulation | regression gates in CI (`.github/workflows/evals.yml`) |
 | Personalization | `gemini-embedding-001` (768-dim), cosine similarity in Python | no dedicated vector DB needed at this scale |
 | Auth | NextAuth v5 (Google), shared-secret bridge to FastAPI | Next.js already validates the session server-side — no JWT needed either side |
 | Email | Resend | simple API, verified-domain sending, free tier plenty for personal volume |
@@ -245,9 +250,12 @@ Served by `backend/app/main.py` + `backend/app/routers/api.py`.
 | `GET` | `/api/me` | the signed-in user's own record |
 | `POST` | `/api/connect-code` | generates a short-lived code for linking Telegram via `/connect <code>` |
 | `POST` | `/api/auth/upsert-user` | internal-secret-only — creates/fetches the Postgres user row on first sign-in |
-| `POST` | `/api/items/{id}/opened` | logs an "opened" engagement event |
-| `GET` | `/r/{id}` | click-through redirect to the source; logs "clicked_source"; public (email clients can't send custom headers) |
-| `GET` | `/track/opened/{id}.png` | 1x1 tracking pixel embedded in emails; logs "opened" |
+| `POST` | `/api/items/{id}/feedback` | 👍/👎 (`{"vote": "up" \| "down"}`) |
+| `POST` | `/api/loopwire-sends/{id}/viewed` | dashboard showed this dispatch (send-level exposure) |
+| `GET` | `/api/recall/next` · `POST /api/recall/{id}/review` · `GET /api/recall/stats` | active recall: next due question, grade an answer (LLM) or self-grade, retention stats |
+| `GET` | `/r/{token}` | click-through redirect; token is an HMAC-signed item id (not enumerable); link scanners/bots aren't counted |
+| `GET`/`POST` | `/f/{token}/{up\|down}` | email feedback: GET shows a one-click confirm (scanners prefetch GETs), POST records |
+| `GET` | `/track/send/{token}.png` | one open pixel per *dispatch*, never per item |
 
 All `/api/*` routes above (except `upsert-user`) require the internal auth
 bridge (`X-Internal-Secret` + `X-User-Id`) and are scoped to that user — see
@@ -285,22 +293,47 @@ dashboard/
   components/WireRow.tsx  dense status-ledger row for the Wire page
   components/ProfileStatusBadge.tsx  Phase B — cold-start progress / adaptive-active indicator
 scripts/demo_summary.py  regenerate a real summary example against any URL
-backend/tests/test_extraction_live.py       extraction acceptance test against 10 real URLs
-backend/tests/test_personalization_live.py  Phase B ranking acceptance test (20 engagement events, real embeddings)
+backend/app/recall.py    active recall: grounded cards, Leitner scheduling, LLM grading, retention stats
+backend/app/llm.py       every Gemini call: retries, timeouts, thinking/temperature per model family, tracing
+backend/app/tracking.py  HMAC-signed public engagement links
+backend/migrations/      Alembic migrations (Render runs `alembic upgrade head` on start)
+backend/tests/           103 unit/integration tests on real Postgres, no network or LLM
+backend/evals/           live evals + REPORT.md (see Verification)
 ```
 
 ## Verification
 
-Tested against real services end-to-end, not mocks:
+Two layers, both re-runnable. Full numbers, per-row outputs and LLM usage are in
+[backend/evals/REPORT.md](backend/evals/REPORT.md).
 
-- [x] **Ingestion** — forwarding a link reliably saves it; `/list` confirms status.
-- [x] **Extraction** — 10/10 live cases pass (`test_extraction_live.py`): articles (normal/paywalled/dead link), YouTube (normal/no-captions/invalid id) — failures flagged, never returned as thin content.
-- [x] **Summarization** — grounded against real Gemini output, no invented facts (see [Real example](#real-example)).
-- [x] **Delivery** — real Resend email + dashboard render + click-through, verified end-to-end repeatedly.
-- [x] **Engagement logging** — opened (pixel/view), clicked_source (redirect), skipped (inferred) all logged for every sent item.
-- [x] **Webhook mode** — verified locally with ngrok; `/telegram-webhook`, `/send-digest`, `/process-pending` auth tested directly (missing/wrong secret → 401).
-- [x] **Multi-tenancy** — two accounts tested end-to-end with zero data leakage; Telegram linking, 10-link/day and 1-send/day caps verified at the boundary.
-- [x] **Adaptive ranking** — `test_personalization_live.py`: 20 real engagement events, clear topical split; new AI-related item scored 0.87 vs. 0.73 for an unrelated item — correct reordering. Cold-start fallback verified with and without a static profile.
+**Unit/integration tests** — `cd backend && uv run pytest`: 103 tests on a real
+Postgres, no network or LLM. Each v1 bug has a regression test (enumerable
+`/r/<id>`, per-item "opened", dashboard order, read time, `vox.com`→"social",
+double-processing, retry storms, HTML injection in email, SSRF incl. via
+redirect, local-day caps, the "link NOT saved" false error).
+
+**Evals** — `uv run python -m evals.run_all` (system `gemini-3.5-flash-lite`,
+judge `gemini-4-hydrogen`):
+
+| Eval | Result |
+|---|---|
+| Extraction, 25 live URLs — right outcome *and* right failure reason | **100%** (v1's own test had labeled two dead links as "paywalls") |
+| Summary faithfulness (claim-level, LLM judge), 18 docs paired A/B | v1 **0.841** → v2 **0.955** |
+| Docs with any unsupported claim | 39% → **22%** |
+| Main-point coverage (1–5) | 4.33 → **4.78** |
+| Conclusion only at the end of a 230k-char doc | v1 missed it (and claimed "no decision") → v2 found it |
+| Prompt-injection canary / paywall teaser flagged / English output | 0 leaks · flagged · 100% (both versions) |
+| Summary faithfulness, tightened v2 prompt + title-aware judge (15/18 docs so far) | v2 **0.976**, 20% of docs with any unsupported claim |
+| Recall cards: verbatim-grounded quote · answerable · tests a key idea · open-ended | **100%** (30/30) · **100%** · **86%** · **93%** |
+| Recall grader vs 28 hand labels (`gemini-3.5-flash-lite`) | **96%** accuracy, **0** false accepts, **3/3** injection attempts resisted (only miss: a partial answer graded incorrect) |
+| Ranking, 240 simulated users × 30 days, NDCG@3 day 14 / day 30 | v1 **0.488 / 0.482** (worse than profile-only 0.505) → v2 **0.687 / 0.728** (+41% / +51%) |
+| Cost of reading whole documents | ~1.8× summarizer input tokens, +0.4s p50 |
+
+All 8 regression gates pass. Still filling in after the free-tier quota resets
+(20 requests/model/day): re-judging the remaining v1 baselines and 3 v2 docs
+with the title-aware judge — calls are cached, so re-running costs only what's
+missing.
+
 - [ ] **Deployed** — `render.yaml` + Vercel steps are ready (see [Deployment](#deployment)); not yet pushed to production hosting.
 
 ## Deployment
@@ -326,13 +359,12 @@ see where your change belongs.
 - Match the existing visual language (ink/paper/signal tokens in `dashboard/app/globals.css`) instead of introducing new colors ad hoc.
 - Keep the honesty bar: if you touch extraction, summarization, or ranking, surface failures the way the rest of the codebase does (`extraction_failed` status, cold-start badge) — don't silently swallow them.
 
-**Testing**: `backend/tests/test_extraction_live.py` and
-`backend/tests/test_personalization_live.py` hit real external APIs and cost
-quota, so they're not run on every commit — but re-run them if you touch
-extraction, summarization, embeddings, or ranking, and update the numbers in
-[Verification](#verification) if behavior changes. There's no CI yet, so a PR
-description that says what you ran and what you saw matters more than a
-green checkmark.
+**Testing**: `uv run pytest` (fast, no network) runs in CI on every push with
+lint, migration-drift checks and the dashboard build. The live evals cost LLM
+quota, so they run on demand / weekly (`.github/workflows/evals.yml`) — re-run
+them if you touch extraction, prompts, embeddings or ranking; a failed gate
+exits non-zero. Eval calls are cached in `evals/.cache/`, so a run interrupted
+by quota resumes without re-paying.
 
 **Submitting**: open a PR against `main` with a short description of what
 changed and why. Never commit `.env` / `.env.local` — both are gitignored;
@@ -340,17 +372,19 @@ check `git status` first if unsure.
 
 ## Limitations (honest, on purpose)
 
-- **Adaptive ranking needs 15 engagement events to kick in.** Before that,
-  every account rides on the static interest profile — see [Phase B](#phase-b-adaptive-personalization-the-actual-differentiator).
-  Deliberate: a noisy vector from 2-3 events would rank worse than no
-  ranking at all, but it does mean the product is unremarkable at first.
+- **The ranking evidence is simulated.** Real users don't exist yet, so the
+  ranking eval uses simulated users with known preferences and position
+  bias. It's the right tool to compare algorithms, not proof of real-world
+  lift — log ranking scores in production to evaluate offline later.
+- **Free-tier Gemini is 20 requests/model/day per project.** One saved link
+  costs ≥1 call, so more than ~2 active users needs billing enabled.
 - **Embeddings are a plain Postgres array column**, not a dedicated vector
   database or `pgvector` — cosine similarity is computed in Python at
   send-build time. Fine at personal/small-group scale; revisit before
   hundreds of users or tens of thousands of items.
-- **Grounded relevance notes need ≥ 0.82 cosine similarity** to a
-  past-engaged item, or they fall back to the static-bio note. Picked from
-  one real test run, not tuned against a large sample.
+- **Grounded relevance notes rarely fire.** 0.82 cosine gives precision 1.00
+  but recall ~7% on the eval corpus; 0.80 doubles recall at 0.76 precision.
+  Chosen for precision because the note makes a factual claim.
 - **Extraction is best-effort.** Paywalled articles and captionless videos
   are correctly flagged as `extraction_failed` rather than guessed at, but
   some forwarded links will only ever show up as a raw link.
@@ -362,6 +396,7 @@ check `git status` first if unsure.
 - **New sending domains land in spam initially.** Even with SPF/DKIM/DMARC
   configured, a brand-new domain has no sender reputation — inherent to
   email delivery, not a code issue.
-- **The email tracking pixel** only fires if the recipient's client loads
-  remote images (common but not universal) — click-through via `/r/{id}` is
-  the more reliable signal.
+- **The dispatch open pixel** only fires if the mail client loads remote
+  images (and Apple Mail Privacy Protection prefetches it), so "opened" is an
+  approximate exposure signal; it only gates skip inference, never adds
+  positive weight. Clicks and 👍/👎 carry the ranking.

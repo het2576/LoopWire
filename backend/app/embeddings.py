@@ -1,56 +1,29 @@
-"""Embeddings for adaptive personalization (Phase B, prdv2.md).
+"""Embeddings for personalization.
 
-Uses Gemini's embedding model, truncated to EMBEDDING_DIMENSIONS via the
-API's native Matryoshka support (output_dimensionality) - smaller vectors
-are cheaper to store and compare at this scale without a meaningful quality
-loss, and there's no dedicated vector DB here (plain Postgres ARRAY column +
-cosine similarity computed in Python, per prdv2.md B.2 - fine at this scale).
+gemini-embedding-001 truncated to EMBEDDING_DIMENSIONS via its Matryoshka
+output_dimensionality. Truncated Matryoshka vectors are NOT unit-norm, so
+cosine (not raw dot product) is used everywhere. Vectors live in a Postgres
+float array; cosine is computed with numpy - fine for a personal library of
+thousands of items (a 1k x 768 matrix is ~3MB and scores in well under 1ms).
 """
 
-import math
+import numpy as np
 
-from google import genai
-from google.genai import types
-
-from app.config import get_settings
+from app.llm import embed
 from app.models import EMBEDDING_DIMENSIONS
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 
-_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set - see SETUP.md")
-        _client = genai.Client(api_key=settings.gemini_api_key)
-    return _client
-
 
 def compute_embedding(text: str) -> list[float]:
-    """Embeds a piece of text (an item's summary, or a static interest
-    profile) into a fixed-size vector for cosine-similarity comparisons."""
-    client = _get_client()
-    response = client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(
-            output_dimensionality=EMBEDDING_DIMENSIONS,
-            task_type="SEMANTIC_SIMILARITY",
-        ),
-    )
-    return list(response.embeddings[0].values)
+    return embed(text, task_type="SEMANTIC_SIMILARITY", dimensions=EMBEDDING_DIMENSIONS, model=EMBEDDING_MODEL)
 
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
+def cosine_similarity(a: list[float] | None, b: list[float] | None) -> float:
+    if a is None or b is None or len(a) == 0 or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
+    va, vb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    na, nb = np.linalg.norm(va), np.linalg.norm(vb)
+    if na == 0 or nb == 0:
         return 0.0
-    return dot / (norm_a * norm_b)
+    return float(va @ vb / (na * nb))

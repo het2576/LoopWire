@@ -23,3 +23,7 @@ prd.md
 
 .claude
 prdv2.md
+
+# Eval caches (scraped article text, model outputs) and per-run results
+backend/evals/.cache/
+backend/evals/results/

@@ -1,4 +1,4 @@
-import { SavedItem, readUrl } from "@/lib/api";
+import { SavedItem } from "@/lib/api";
 import { STATUS_META, TYPE_LABEL, effectiveStatus, relativeTime } from "@/lib/format";
 
 const DOT_CLASS: Record<string, string> = {
@@ -25,7 +25,9 @@ export default function WireRow({ item }: { item: SavedItem }) {
       className="border-b border-ink/7 last:border-0"
     >
       <a
-        href={readUrl(item.item_id)}
+        href={item.url}
+        target="_blank"
+        rel="noopener noreferrer"
         className="group grid grid-cols-[12px_1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-4 transition-colors hover:bg-white/6 sm:grid-cols-[12px_118px_1fr_auto_auto] sm:gap-x-4 sm:px-5"
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_CLASS[meta.tone]}`} aria-hidden />

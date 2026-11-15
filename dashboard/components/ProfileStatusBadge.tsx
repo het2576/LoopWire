@@ -12,10 +12,10 @@ export default async function ProfileStatusBadge() {
     >
       <span className={`h-1.5 w-1.5 rounded-full ${status.is_adaptive ? "bg-ok signal-dot" : "bg-wire"}`} aria-hidden />
       {status.is_adaptive ? (
-        "Digest adapts to your reading"
+        "Ordered by what you actually click and rate"
       ) : (
         <>
-          {status.engagement_count}/{status.threshold} interactions before the digest adapts
+          {status.engagement_count}/{status.threshold} clicks or ratings until your history outweighs your written profile
         </>
       )}
     </div>

@@ -10,10 +10,13 @@ export type LoopwireItem = {
   source_url: string;
   read_url: string;
   couldnt_extract: boolean;
+  failure_reason: string | null;
   summary: string | null;
   key_takeaway: string | null;
   relevance_note: string | null;
   read_time_minutes: number | null;
+  is_exploration: boolean;
+  feedback: "up" | "down" | null;
 };
 
 export type LoopwireSend = {
@@ -33,8 +36,9 @@ export type LoopwireSendSummary = {
 
 export type StatsBucket = {
   total_sent: number;
-  opened: number;
   clicked_source: number;
+  feedback_up: number;
+  feedback_down: number;
   skipped: number;
   engagement_rate: number;
 };
@@ -46,7 +50,7 @@ export type SavedItem = {
   title: string;
   url: string;
   type: "article" | "youtube" | "reddit" | "github" | "hn" | "pdf" | "unsupported";
-  status: "pending" | "extracted" | "extraction_failed" | "summarized" | "sent";
+  status: "pending" | "extracted" | "extraction_failed" | "summarization_failed" | "summarized" | "sent";
   extraction_error: string | null;
   added_at: string;
   loopwire_send_id: number | null;
@@ -68,6 +72,37 @@ export type ProfileStatus = {
   engagement_count: number;
   threshold: number;
   is_adaptive: boolean;
+  adaptive_weight: number;
+};
+
+export type RecallCard = {
+  card_id: number;
+  question: string;
+  source_title: string;
+  source_url: string;
+  due_count: number;
+};
+
+export type RecallVerdict = "correct" | "partial" | "incorrect";
+
+export type RecallReviewResult = {
+  verdict: RecallVerdict;
+  feedback: string | null;
+  reference_answer: string;
+  evidence_quote: string;
+  next_due_at: string | null;
+  retired: boolean;
+};
+
+export type RecallStats = {
+  reviews: number;
+  correct: number;
+  partial: number;
+  retention_rate: number | null;
+  cards_total: number;
+  cards_active: number;
+  cards_retired: number;
+  cards_due: number;
 };
 
 /** Every backend call authenticates as "this Next.js server, acting on
@@ -89,7 +124,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T | null> {
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T | null> {
   const url = `${BACKEND_URL}${path}`;
   try {
     const headers = { ...(await authHeaders()), ...(init.headers as Record<string, string>) };
@@ -113,13 +148,19 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T | nu
   }
 }
 
-export function readUrl(itemId: number): string {
-  return `${BACKEND_URL}/r/${itemId}`;
+/** Send-level exposure: the user is looking at this dispatch. Deliberately
+ * NOT per item - v1 marked every item "opened" on page load, which made the
+ * personalization signal mean "was shown" instead of "was read". */
+export async function markSendViewed(sendId: number): Promise<void> {
+  await apiFetch(`/api/loopwire-sends/${sendId}/viewed`, { method: "POST" });
 }
 
-export async function markOpened(itemId: number): Promise<void> {
-  const headers = await authHeaders();
-  fetch(`${BACKEND_URL}/api/items/${itemId}/opened`, { method: "POST", headers, cache: "no-store" }).catch(() => {});
+export function getNextRecall(): Promise<RecallCard | null> {
+  return apiFetch<RecallCard>("/api/recall/next");
+}
+
+export function getRecallStats(): Promise<RecallStats | null> {
+  return apiFetch<RecallStats>("/api/recall/stats");
 }
 
 export function getLatestLoopwireSend(): Promise<LoopwireSend | null> {

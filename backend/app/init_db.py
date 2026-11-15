@@ -1,23 +1,33 @@
-"""Drops and recreates every table for the multi-tenant schema (Phase A,
-prdv2.md). Per-user interest profiles now live on the `users` table, seeded
-blank - there's no more global default to seed.
+"""Bring the database schema up to date (Alembic migrations).
 
-This is destructive by design for this migration (the old single-user
-schema's data doesn't carry over cleanly to a required user_id FK) - only
-run this if you've already decided to start the multi-tenant schema fresh.
+    uv run python -m app.init_db            # upgrade to latest (safe, non-destructive)
+    uv run python -m app.init_db --reset    # drop everything first (local dev only)
 
-Run with: uv run python -m app.init_db
+v1 dropped and recreated every table on each run; schema changes now go
+through migrations/ so a deploy never wipes data.
 """
 
-from app import models  # noqa: F401  (ensures models are registered on Base.metadata)
+import sys
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+
+from app import models  # noqa: F401
 from app.db import Base, engine
+
+ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
 def main() -> None:
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    print("Dropped old schema and created the multi-tenant schema (users, connection_codes, "
-          "saved_items, loopwire_sends, engagement_events). No seed data - sign in to create your first user.")
+    cfg = Config(str(ALEMBIC_INI))
+    if "--reset" in sys.argv:
+        with engine.begin() as conn:
+            Base.metadata.drop_all(bind=conn)
+            conn.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+        print("Dropped all tables.")
+    command.upgrade(cfg, "head")
+    print("Schema is at the latest migration.")
 
 
 if __name__ == "__main__":

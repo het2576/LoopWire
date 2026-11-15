@@ -1,13 +1,15 @@
 [project]
 name = "loopwire-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "Loopwire backend: link ingestion, grounded summarization, adaptive ranking, active recall"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.1",
     "apscheduler>=3.11.3",
     "fastapi>=0.139.0",
     "google-genai>=2.10.0",
     "httpx>=0.28.1",
+    "numpy>=2.5.4",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
@@ -24,3 +26,20 @@ dependencies = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE", "RUF100"]
+# B008: FastAPI's Depends()/Header() default-argument idiom is intentional.
+ignore = ["B008", "E501", "SIM105"]
