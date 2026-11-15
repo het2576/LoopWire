@@ -1,155 +1,215 @@
-"""Adaptive personalization (Phase B, prdv2.md B.3).
+"""Adaptive personalization.
 
-Ranks a user's pending dispatch items by similarity to what they've
-actually engaged with, instead of chronological order or a static bio -
-falling back to the static profile for cold-start users who don't have
-enough engagement history yet to trust a computed vector (B.3.3).
+score(item) = a * cos(item, interest_vector) + (1 - a) * cos(item, profile_vector)
+a = n_pos / (n_pos + ADAPTIVE_HALF_WEIGHT_SIGNALS)
+
+What changed vs. v1 and why (evals/ranking_eval.py quantifies each):
+- Signals: per-item "opened" is gone (it fired for every item whenever the
+  email/dashboard loaded, so the vector converged to "the average of
+  everything you were sent"). Clicks, explicit feedback and exposure-aware
+  skips remain.
+- Cold start is a smooth blend, not a hard switch at 15 events. v1 counted
+  skips toward the threshold, so a user who ignored everything became
+  "adaptive" with a vector made purely of negative weights.
+- Recency decay: interests drift; a click from six months ago shouldn't weigh
+  the same as yesterday's.
+- Optional exploration slot so the dispatch can't collapse onto one topic -
+  every item is delivered anyway, but position drives attention, and without
+  a chance to engage with off-profile items the model can never learn you
+  like them.
 """
 
+import datetime as dt
+from dataclasses import dataclass
+
+import numpy as np
 from sqlalchemy.orm import Session
 
 from app.embeddings import compute_embedding, cosine_similarity
 from app.models import (
-    COLD_START_ENGAGEMENT_THRESHOLD,
+    ADAPTIVE_HALF_WEIGHT_SIGNALS,
     EVENT_CLICKED_SOURCE,
-    EVENT_OPENED,
+    EVENT_FEEDBACK_DOWN,
+    EVENT_FEEDBACK_UP,
     EVENT_SKIPPED,
+    POSITIVE_EVENTS,
+    STATUS_SUMMARIZED,
     EngagementEvent,
     SavedItem,
     User,
 )
 
-# Weights for the interest-vector weighted average (B.3.2). Clicking through
-# to the source is the strongest positive signal; opening without clicking
-# is weaker positive; an explicitly-inferred skip is *subtracted*, not just
-# excluded, so consistently-skipped topics actively pull the vector away.
-ENGAGEMENT_WEIGHTS = {
-    EVENT_CLICKED_SOURCE: 2.0,
-    EVENT_OPENED: 1.0,
-    EVENT_SKIPPED: -0.5,
+SIGNAL_WEIGHTS = {
+    EVENT_FEEDBACK_UP: 2.0,
+    EVENT_CLICKED_SOURCE: 1.0,
+    EVENT_SKIPPED: -0.3,
+    EVENT_FEEDBACK_DOWN: -1.5,
 }
+RECENCY_HALF_LIFE_DAYS = 45.0
 
-# Above this cosine similarity, a past-engaged item counts as strong enough
-# evidence to name directly in a relevance note ("similar to X you read
-# last week"). Below it, we fall back to a generic note instead of
-# stretching a weak match into a claim. Named constant so it's easy to
-# recalibrate once there's real usage data to tune against.
+# Above this cosine similarity a past item is named in the relevance note
+# ("similar to X, which you clicked"). Calibrated in evals/ranking_eval.py on
+# gemini-embedding-001: same-topic pairs median 0.77, cross-topic 0.72. At 0.82
+# precision is 1.00 but recall 7% (rarely fires, never wrong); 0.80 doubles
+# recall at 0.76 precision. The note makes a factual claim, so precision wins.
 STRONG_SIMILARITY_THRESHOLD = 0.82
 
-
-def total_engagement_count(db: Session, user_id: int) -> int:
-    return db.query(EngagementEvent).filter(EngagementEvent.user_id == user_id).count()
-
-
-def is_cold_start(db: Session, user_id: int) -> bool:
-    return total_engagement_count(db, user_id) < COLD_START_ENGAGEMENT_THRESHOLD
+EXPLORATION_SLOT = 2  # 0-based position the exploration pick is moved to
+MIN_ITEMS_FOR_EXPLORATION = 4
 
 
-def compute_interest_vector(db: Session, user_id: int) -> list[float] | None:
-    """Weighted average of engaged items' embeddings. Returns None if
-    there's nothing to compute from yet (no embedded, engaged items)."""
-    events = (
-        db.query(EngagementEvent)
-        .join(SavedItem, SavedItem.id == EngagementEvent.item_id)
-        .filter(EngagementEvent.user_id == user_id)
-        .filter(SavedItem.embedding.isnot(None))
-        .all()
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+def positive_signal_count(db: Session, user_id: int) -> int:
+    return (
+        db.query(EngagementEvent.item_id)
+        .filter(EngagementEvent.user_id == user_id, EngagementEvent.event_type.in_(POSITIVE_EVENTS))
+        .distinct()
+        .count()
     )
 
-    weighted_sum: list[float] | None = None
-    total_abs_weight = 0.0
 
-    for event in events:
-        weight = ENGAGEMENT_WEIGHTS.get(event.event_type, 0.0)
-        embedding = event.item.embedding
+def adaptive_weight(n_positive: int) -> float:
+    return n_positive / (n_positive + ADAPTIVE_HALF_WEIGHT_SIGNALS) if n_positive > 0 else 0.0
+
+
+def weighted_interest_vector(
+    signals: list[tuple[list[float], str, dt.datetime]], now: dt.datetime
+) -> list[float] | None:
+    """Pure function (shared by the app and the offline ranking eval).
+    signals = (embedding, event_type, timestamp). Returns None unless there's
+    net positive evidence - negatives alone define what you *don't* want,
+    which isn't a direction to rank toward."""
+    acc: np.ndarray | None = None
+    total_abs = 0.0
+    total_pos = 0.0
+    for embedding, event_type, ts in signals:
+        weight = SIGNAL_WEIGHTS.get(event_type, 0.0)
         if weight == 0.0 or not embedding:
             continue
-        if weighted_sum is None:
-            weighted_sum = [0.0] * len(embedding)
-        elif len(embedding) != len(weighted_sum):
-            continue  # shouldn't happen (fixed EMBEDDING_DIMENSIONS), but guard anyway
-
-        for i, value in enumerate(embedding):
-            weighted_sum[i] += value * weight
-        # Normalize by total *magnitude* of weight, not the signed sum - if
-        # skips ever outweighed positive signals, dividing by a signed sum
-        # near zero (or negative) would blow up or flip the vector's
-        # direction, which isn't what "weighted average" should mean here.
-        total_abs_weight += abs(weight)
-
-    if weighted_sum is None or total_abs_weight == 0:
+        vec = np.asarray(embedding, dtype=float)
+        norm = np.linalg.norm(vec)
+        if norm == 0:
+            continue
+        age_days = max((now - ts).total_seconds() / 86400.0, 0.0) if ts else 0.0
+        w = weight * 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+        acc = vec / norm * w if acc is None else acc + vec / norm * w
+        total_abs += abs(w)
+        if w > 0:
+            total_pos += w
+    if acc is None or total_pos == 0.0:
         return None
+    return (acc / total_abs).tolist()
 
-    return [v / total_abs_weight for v in weighted_sum]
+
+def compute_interest_vector(db: Session, user_id: int, now: dt.datetime | None = None) -> list[float] | None:
+    rows = (
+        db.query(SavedItem.embedding, EngagementEvent.event_type, EngagementEvent.timestamp)
+        .join(EngagementEvent, EngagementEvent.item_id == SavedItem.id)
+        .filter(EngagementEvent.user_id == user_id, SavedItem.embedding.isnot(None))
+        .all()
+    )
+    return weighted_interest_vector([(e, t, ts) for e, t, ts in rows], now or _now())
 
 
-def get_ranking_context(db: Session, user: User) -> tuple[list[float] | None, bool]:
-    """Returns (ranking_vector, is_cold_start). ranking_vector is None only
-    when there's truly nothing to rank on (no static profile and no
-    engagement history yet) - callers should fall back to chronological
-    order in that case."""
-    if is_cold_start(db, user.id):
-        if user.interest_profile_text:
-            return compute_embedding(user.interest_profile_text), True
-        return None, True
+def profile_embedding(db: Session, user: User) -> list[float] | None:
+    if not user.interest_profile_text:
+        return None
+    if user.interest_profile_embedding is None:
+        user.interest_profile_embedding = compute_embedding(user.interest_profile_text)
+    return user.interest_profile_embedding
 
-    vector = compute_interest_vector(db, user.id)
-    if vector is None:
-        # Cleared the engagement threshold but no embedded engaged items yet
-        # (e.g. all prior engagement predates Phase B) - fall back to the
-        # static profile if there is one, rather than an empty vector.
-        if user.interest_profile_text:
-            return compute_embedding(user.interest_profile_text), True
-        return None, True
 
-    # Recomputed before each send rather than in real time on every event
-    # (B.3.2) - this is the one place it's persisted.
-    user.interest_vector = vector
-    return vector, False
+@dataclass
+class RankingContext:
+    interest_vector: list[float] | None
+    profile_vector: list[float] | None
+    alpha: float
+    n_positive: int
+
+    @property
+    def is_adaptive(self) -> bool:
+        return self.interest_vector is not None and self.alpha >= 0.5
+
+    @property
+    def has_signal(self) -> bool:
+        return self.interest_vector is not None or self.profile_vector is not None
+
+
+def score(ctx: RankingContext, embedding: list[float] | None) -> float | None:
+    if not embedding or not ctx.has_signal:
+        return None
+    if ctx.interest_vector is None:
+        return cosine_similarity(embedding, ctx.profile_vector)
+    if ctx.profile_vector is None:
+        return cosine_similarity(embedding, ctx.interest_vector)
+    return ctx.alpha * cosine_similarity(embedding, ctx.interest_vector) + (1 - ctx.alpha) * cosine_similarity(
+        embedding, ctx.profile_vector
+    )
+
+
+def get_ranking_context(db: Session, user: User) -> RankingContext:
+    n_pos = positive_signal_count(db, user.id)
+    interest = compute_interest_vector(db, user.id) if n_pos else None
+    if interest is not None:
+        user.interest_vector = interest  # persisted for inspection/debugging
+    return RankingContext(
+        interest_vector=interest,
+        profile_vector=profile_embedding(db, user),
+        alpha=adaptive_weight(n_pos) if interest is not None else 0.0,
+        n_positive=n_pos,
+    )
+
+
+@dataclass
+class RankedItem:
+    item: SavedItem
+    score: float | None
+    is_exploration: bool = False
+
+
+def rank_items(items: list[SavedItem], ctx: RankingContext, explore: bool = True) -> list[RankedItem]:
+    """Highest affinity first. Unembedded summarized items follow in
+    chronological order, and items that couldn't be processed go last so the
+    "couldn't extract" cards never interleave with real reading."""
+    scored: list[RankedItem] = []
+    unscored: list[RankedItem] = []
+    failed: list[RankedItem] = []
+    for item in items:
+        if item.status != STATUS_SUMMARIZED:
+            failed.append(RankedItem(item, None))
+            continue
+        s = score(ctx, item.embedding)
+        (scored if s is not None else unscored).append(RankedItem(item, s))
+    scored.sort(key=lambda r: r.score, reverse=True)  # type: ignore[arg-type, return-value]
+
+    if explore and ctx.is_adaptive and len(scored) >= MIN_ITEMS_FOR_EXPLORATION:
+        # Lowest-affinity item, promoted to a visible-but-not-top slot.
+        pick = scored.pop()
+        pick.is_exploration = True
+        scored.insert(min(EXPLORATION_SLOT, len(scored)), pick)
+
+    return scored + unscored + failed
 
 
 def find_similar_engaged_items(
     db: Session, user_id: int, item_embedding: list[float], exclude_item_id: int, top_k: int = 2
 ) -> list[tuple[SavedItem, float]]:
-    """Among items this user has actually opened/clicked before, finds the
-    top-k most similar to a candidate new item - concrete evidence for the
-    grounded relevance note (B.3.5). Returns (item, similarity) pairs."""
-    engaged_item_ids = [
-        row[0]
-        for row in (
-            db.query(EngagementEvent.item_id)
-            .filter(EngagementEvent.user_id == user_id)
-            .filter(EngagementEvent.event_type.in_([EVENT_OPENED, EVENT_CLICKED_SOURCE]))
-            .filter(EngagementEvent.item_id != exclude_item_id)
-            .distinct()
-            .all()
-        )
-    ]
-    if not engaged_item_ids:
-        return []
-
+    """Among items the user clicked through to or upvoted (not merely was
+    sent), the top-k most similar to a candidate - evidence for the grounded
+    relevance note."""
+    engaged_ids = (
+        db.query(EngagementEvent.item_id)
+        .filter(EngagementEvent.user_id == user_id, EngagementEvent.event_type.in_(POSITIVE_EVENTS))
+        .filter(EngagementEvent.item_id != exclude_item_id)
+        .distinct()
+        .scalar_subquery()
+    )
     candidates = (
-        db.query(SavedItem)
-        .filter(SavedItem.id.in_(engaged_item_ids))
-        .filter(SavedItem.embedding.isnot(None))
-        .all()
+        db.query(SavedItem).filter(SavedItem.id.in_(engaged_ids), SavedItem.embedding.isnot(None)).all()
     )
     scored = [(item, cosine_similarity(item_embedding, item.embedding)) for item in candidates]
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored[:top_k]
-
-
-def rank_items_by_similarity(items: list[SavedItem], vector: list[float] | None) -> list[SavedItem]:
-    """Orders pending dispatch items by similarity to the ranking vector,
-    highest affinity first. Items without an embedding (e.g. extraction
-    failed before summarization ever ran) sort last, keeping the "couldn't
-    extract" cards at the bottom rather than randomly interleaved."""
-    if vector is None:
-        return items
-
-    def score(item: SavedItem) -> float:
-        if not item.embedding:
-            return -1.0
-        return cosine_similarity(item.embedding, vector)
-
-    return sorted(items, key=score, reverse=True)

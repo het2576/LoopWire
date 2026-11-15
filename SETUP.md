@@ -17,7 +17,8 @@ for the real Telegram → Supabase → Gemini → Resend flow.
    from `postgresql://` to `postgresql+psycopg2://` (SQLAlchemy needs the driver
    name), e.g.:
    `DATABASE_URL=postgresql+psycopg2://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres`
-6. Run `cd backend && uv run python -m app.init_db` to create tables (each
+6. Run `cd backend && uv run python -m app.init_db` to apply the database
+   migrations (Alembic; safe to re-run, and Render runs it on every start). (Each
    user's interest profile starts blank until they set it in Settings —
    there's no seeded default anymore, since Phase A made this multi-tenant).
 
@@ -125,12 +126,16 @@ a schedule, which also happens to wake the service up if it was asleep.
    - URL: `https://<your-render-url>/send-digest?key=<SEND_LOOPWIRE_SECRET>`
    - Schedule: whatever you want (e.g. daily at 08:00 in your timezone)
    - Request method: `POST`
+   - Better: drop `?key=` from the URL and send the secret as an
+     `X-Cron-Key` header instead (query strings end up in access logs)
 3. Save. That's the entire schedule - no code or redeploy needed to change
    the time later, just edit the cron job.
 4. Test it immediately with the "Execute now" button in cron-job.org's UI,
    or manually: `curl -X POST "https://<your-render-url>/send-digest?key=<SEND_LOOPWIRE_SECRET>"`
-   Expect `{"status": "sent", "items_count": N}` (or `"no_new_items"` if
-   nothing's been summarized since the last dispatch).
+   Expect `202 {"status": "accepted"}` - the dispatch is built in the
+   background because it makes several LLM calls and cron-job.org times out
+   after 30s. Add `&wait=true` to block and get
+   `{"status": "sent", "sent_count": N}` (or `"no_new_items"`) instead.
 
 If you'd rather self-host on something that supports always-on processes
 (a paid Render plan, a VPS, etc.), `app/scheduler.py`'s `start_scheduler()`
@@ -345,7 +350,7 @@ Google sign-in button.
 
 From `backend/`:
 ```bash
-uv run python -m app.init_db        # one-time: create tables
+uv run python -m app.init_db        # apply migrations (safe to re-run; --reset wipes local data)
 uv run uvicorn app.main:app --reload --port 8000   # API + webhook + /send-digest + /process-pending
 ```
 

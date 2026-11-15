@@ -18,7 +18,8 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install uv && uv sync --frozen
-    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Migrations run on every start (idempotent; preDeployCommand is paid-only).
+    startCommand: uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
@@ -34,7 +35,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash-lite
       - key: RESEND_API_KEY
         sync: false
       - key: LOOPWIRE_FROM_EMAIL
@@ -45,6 +46,11 @@ services:
         sync: false
       - key: INTERNAL_AUTH_SECRET
         sync: false
+      # HMAC key for the public click/feedback/open-pixel links in emails.
+      - key: TRACKING_SIGNING_SECRET
+        generateValue: true
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
       - key: WEBSHARE_PROXY_USERNAME
         sync: false
       - key: WEBSHARE_PROXY_PASSWORD

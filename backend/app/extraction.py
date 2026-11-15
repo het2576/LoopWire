@@ -17,6 +17,7 @@ Supported types
 import io
 import json
 import re
+from dataclasses import dataclass
 
 import httpx
 import trafilatura
@@ -29,16 +30,25 @@ from youtube_transcript_api._errors import (
 from youtube_transcript_api.proxies import WebshareProxyConfig
 
 from app.config import get_settings
+from app.url_utils import UnsafeURLError, assert_public_url, extract_youtube_video_id
 
 MIN_ARTICLE_WORDS = 200
+# A page that declares itself subscriber-only (schema.org isAccessibleForFree
+# = false, Google's paywall markup used by NYT/WSJ/FT/Substack...) and yields
+# fewer words than this is a preview, not the article. v1 summarized NYT's
+# ~300-word teaser as if it were the full piece - found by extraction_eval.
+PAYWALL_PREVIEW_MAX_WORDS = 1200
+_PAYWALL_MARKER = re.compile(rb'"isAccessibleForFree"\s*:\s*"?(false|False)"?')
 MIN_PDF_WORDS = 50
 MAX_REDDIT_COMMENTS = 10   # top-level comments to include
 MAX_HN_COMMENTS = 10       # top comments to include
 
-YOUTUBE_ID_PATTERNS = [
-    re.compile(r"(?:youtube\.com/watch\?v=|youtube\.com/shorts/|youtube\.com/live/)([\w-]{11})"),
-    re.compile(r"youtu\.be/([\w-]{11})"),
-]
+MAX_FETCH_BYTES = 25 * 1024 * 1024  # PDFs can be big; anything past this is not a "read later" link
+MAX_REDIRECTS = 5
+# An honest, identifying UA. Impersonating Chrome was tried and measured worse:
+# Wikimedia (and others) 403 browser-looking UAs that lack real browser
+# headers - see evals/extraction_eval.py.
+USER_AGENT = "Loopwire/2.0 (personal read-later summarizer; +https://github.com/loopwire)"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +65,75 @@ def _base_result(*extra_keys: str) -> dict:
     for k in extra_keys:
         base[k] = None
     return base
+
+
+def count_words(text: str | None) -> int:
+    return len(text.split()) if text else 0
+
+
+class FetchError(Exception):
+    """Carries an extraction error code string, e.g. 'http_404: ...'."""
+
+
+@dataclass
+class Fetched:
+    url: str
+    status_code: int
+    headers: httpx.Headers
+    content: bytes
+    charset: str | None
+
+    @property
+    def text(self) -> str:
+        return self.content.decode(self.charset or "utf-8", errors="replace")
+
+
+def safe_fetch(url: str, timeout: float = 20.0) -> Fetched:
+    """GET a user-supplied URL with SSRF protection on *every* hop.
+
+    trafilatura.fetch_url followed redirects internally, so even a checked
+    public URL could 302 to http://169.254.169.254/. Redirects are followed
+    by hand here, re-validating each target. Also surfaces the real HTTP
+    status - previously a dead link (404) and a paywall (403) both came back
+    as the same "no content returned" error.
+    """
+    current = url
+    with httpx.Client(timeout=timeout, follow_redirects=False, headers={"User-Agent": USER_AGENT}) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            try:
+                assert_public_url(current)
+            except UnsafeURLError as exc:
+                raise FetchError(f"blocked_url: {exc}") from None
+            try:
+                with client.stream("GET", current) as resp:
+                    if resp.is_redirect and resp.headers.get("location"):
+                        current = str(resp.url.join(resp.headers["location"]))
+                        continue
+                    body = bytearray()
+                    for chunk in resp.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > MAX_FETCH_BYTES:
+                            raise FetchError("too_large: response exceeded size limit")
+                    if resp.status_code == 404 or resp.status_code == 410:
+                        raise FetchError(f"http_{resp.status_code}: page not found (dead link)")
+                    if resp.status_code in (401, 402, 403):
+                        raise FetchError(f"http_{resp.status_code}: access denied (paywall or bot block)")
+                    if resp.status_code == 429:
+                        raise FetchError("http_429: rate limited by the site")
+                    if resp.status_code >= 400:
+                        raise FetchError(f"http_{resp.status_code}: site returned an error")
+                    return Fetched(
+                        url=str(resp.url),
+                        status_code=resp.status_code,
+                        headers=resp.headers,
+                        content=bytes(body),
+                        charset=resp.charset_encoding,
+                    )
+            except httpx.TimeoutException:
+                raise FetchError("fetch_failed: timed out") from None
+            except httpx.HTTPError as exc:
+                raise FetchError(f"fetch_failed: {type(exc).__name__}") from None
+    raise FetchError("fetch_failed: too many redirects")
 
 
 # ── YouTube ───────────────────────────────────────────────────────────────────
@@ -75,20 +154,12 @@ def _youtube_transcript_client() -> YouTubeTranscriptApi:
     return YouTubeTranscriptApi()
 
 
-def extract_youtube_video_id(url: str) -> str | None:
-    for pattern in YOUTUBE_ID_PATTERNS:
-        match = pattern.search(url)
-        if match:
-            return match.group(1)
-    return None
-
-
 def extract_youtube(url: str) -> dict:
     """Extract transcript + metadata for a YouTube video.
 
     Returns {title, channel, transcript_text, extraction_success, error}.
     """
-    result = _base_result("channel", "transcript_text")
+    result = _base_result("channel", "transcript_text", "duration_seconds")
 
     video_id = extract_youtube_video_id(url)
     if not video_id:
@@ -131,15 +202,22 @@ def extract_youtube(url: str) -> dict:
     except VideoUnavailable:
         result["error"] = "video_unavailable"
         return result
-    except Exception as exc:
-        result["error"] = f"transcript_fetch_failed: {exc}"
+    except Exception as exc:  # noqa: BLE001 - library raises many request/blocking types
+        # First line only: youtube-transcript-api errors are multi-paragraph.
+        detail = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:200]
+        result["error"] = f"transcript_fetch_failed: {type(exc).__name__}: {detail}"
         return result
 
-    text = " ".join(snippet.text.strip() for snippet in transcript if snippet.text.strip())
+    snippets = list(transcript)
+    text = " ".join(snippet.text.strip() for snippet in snippets if snippet.text.strip())
     if not text:
         result["error"] = "empty_transcript"
         return result
 
+    # Real video length from transcript timing - this is what read time is
+    # computed from, instead of asking the LLM to guess.
+    last = snippets[-1]
+    result["duration_seconds"] = int(float(last.start) + float(getattr(last, "duration", 0) or 0))
     result["clean_text"] = text
     result["extraction_success"] = True
     return result
@@ -159,21 +237,39 @@ def extract_article(url: str) -> dict:
         url = raw_url
 
     try:
-        downloaded = trafilatura.fetch_url(url)
-    except Exception as exc:
-        result["error"] = f"fetch_failed: {exc}"
+        resp = safe_fetch(url)
+    except FetchError as exc:
+        result["error"] = str(exc)
         return result
 
-    if not downloaded:
-        result["error"] = "fetch_failed: no content returned (possible paywall/block)"
+    content_type = resp.headers.get("content-type", "").lower()
+    if "pdf" in content_type:
+        # Classified as an article by URL but actually serves a PDF
+        # (e.g. arxiv /abs -> /pdf redirects, download endpoints).
+        return extract_pdf(url)
+    if not resp.content.strip():
+        result["error"] = "fetch_failed: empty response body"
+        return result
+
+    if "text/plain" in content_type or "text/markdown" in content_type:
+        # Raw files (e.g. GitHub /blob/ -> raw.githubusercontent.com) have no
+        # HTML for trafilatura to parse - the body *is* the content.
+        text = resp.text.strip()
+        result["title"] = url.rstrip("/").rsplit("/", 1)[-1]
+        result["clean_text"] = text
+        n = count_words(text)
+        if n < MIN_ARTICLE_WORDS:
+            result["error"] = f"thin_content: only {n} words in file (min {MIN_ARTICLE_WORDS})"
+            return result
+        result["extraction_success"] = True
         return result
 
     try:
         extracted = trafilatura.extract(
-            downloaded, output_format="json", with_metadata=True, favor_precision=True
+            resp.content, url=resp.url, output_format="json", with_metadata=True, favor_precision=True
         )
-    except Exception as exc:
-        result["error"] = f"parse_failed: {exc}"
+    except Exception as exc:  # noqa: BLE001 - trafilatura/lxml raise assorted types
+        result["error"] = f"parse_failed: {type(exc).__name__}"
         return result
 
     if not extracted:
@@ -193,6 +289,12 @@ def extract_article(url: str) -> dict:
         result["error"] = (
             f"thin_content: only {word_count} words extracted (min {MIN_ARTICLE_WORDS}), "
             "likely paywalled or JS-rendered"
+        )
+        return result
+
+    if word_count < PAYWALL_PREVIEW_MAX_WORDS and _PAYWALL_MARKER.search(resp.content):
+        result["error"] = (
+            f"paywalled: publisher marks this article subscriber-only; only a {word_count}-word preview was readable"
         )
         return result
 
@@ -268,13 +370,10 @@ def extract_reddit(url: str) -> dict:
     full_text = "\n\n".join(sections)
     word_count = len(full_text.split())
 
-    if word_count < MIN_ARTICLE_WORDS:
-        # Link post with no body — still worth saving if comments exist
-        if not comments:
-            result["error"] = (
-                f"thin_content: Reddit post has only {word_count} words (link post with no discussion yet)"
-            )
-            return result
+    # Link post with no body is still worth saving if it has discussion.
+    if word_count < MIN_ARTICLE_WORDS and not comments:
+        result["error"] = f"thin_content: Reddit post has only {word_count} words (link post with no discussion yet)"
+        return result
 
     result["title"] = f"{title} [{subreddit}]" if subreddit else title
     result["author"] = f"u/{author}" if author else None
@@ -481,24 +580,14 @@ def extract_pdf(url: str) -> dict:
     if raw_url:
         url = raw_url
 
-    # Download
     try:
-        resp = httpx.get(
-            url,
-            follow_redirects=True,
-            timeout=30,
-            headers={"User-Agent": "Loopwire/1.0 (PDF reader)"},
-        )
-    except httpx.HTTPError as exc:
-        result["error"] = f"fetch_failed: {exc}"
-        return result
-
-    if resp.status_code != 200:
-        result["error"] = f"fetch_failed: HTTP {resp.status_code}"
+        resp = safe_fetch(url, timeout=30)
+    except FetchError as exc:
+        result["error"] = str(exc)
         return result
 
     content_type = resp.headers.get("content-type", "")
-    if "pdf" not in content_type.lower() and not url.lower().endswith(".pdf"):
+    if "pdf" not in content_type.lower() and not resp.content.startswith(b"%PDF"):
         result["error"] = "not_a_pdf: URL did not return a PDF content-type"
         return result
 
@@ -514,8 +603,8 @@ def extract_pdf(url: str) -> dict:
         from pypdf import PdfReader  # lazy import — only needed for PDF type
 
         reader = PdfReader(io.BytesIO(resp.content))
-    except Exception as exc:
-        result["error"] = f"parse_failed: {exc}"
+    except Exception as exc:  # noqa: BLE001 - pypdf raises many parser error types
+        result["error"] = f"parse_failed: {type(exc).__name__}"
         return result
 
     # Extract metadata
@@ -535,8 +624,8 @@ def extract_pdf(url: str) -> dict:
             text = page.extract_text() or ""
             if text.strip():
                 pages.append(text.strip())
-        except Exception:
-            continue  # skip unreadable pages
+        except Exception:  # noqa: BLE001 - one corrupt page shouldn't sink the document
+            continue
 
     full_text = "\n\n".join(pages)
     # Normalise whitespace

@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.engagement import infer_skipped_events
 from app.loopwire_send import build_and_send_pending_for_user, users_with_pending_items
-from app.models import User
+from app.models import LoopwireSend, User
 
 logger = logging.getLogger("loopwire.scheduler")
 
@@ -25,10 +25,9 @@ def run_loopwire_cycle() -> dict:
     user's own dispatch independently, respecting each user's own daily cap."""
     settings = get_settings()
     with SessionLocal() as db:
-        # Skipped-event inference only matters for users who already have at
-        # least one send to compare against.
-        for user in db.query(User).filter(User.telegram_chat_id.isnot(None)).all():
-            infer_skipped_events(db, user.id)
+        # Skip inference only matters for users with at least one earlier send.
+        for (user_id,) in db.query(LoopwireSend.user_id).distinct().all():
+            infer_skipped_events(db, user_id)
 
         pending_user_ids = users_with_pending_items(db)
         results = []
