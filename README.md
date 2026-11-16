@@ -401,7 +401,7 @@ after a prompt change only pays for what changed.
 
 ## Deployment
 
-- **Backend**: `backend/render.yaml` is a single Render Blueprint web service (no separate bot or worker), driven by webhook pushes and cron pings so it fits Render's free tier. It runs `alembic upgrade head` on start and generates `TRACKING_SIGNING_SECRET`. Set `GEMINI_MODEL=gemini-3.5-flash-lite` and `APP_TIMEZONE`. Steps: [SETUP.md](SETUP.md) §8.
+- **Backend**: `backend/render.yaml` is a single Render Blueprint web service (no separate bot or worker), driven by webhook pushes and cron pings so it fits Render's free tier. It runs `alembic upgrade head` on start (a database created by v1, which has tables but no migration history, is upgraded in place and keeps its data) and generates `TRACKING_SIGNING_SECRET`. Set `GEMINI_MODEL=gemini-3.5-flash-lite` and `APP_TIMEZONE`. Steps: [SETUP.md](SETUP.md) §8.
 - **Dashboard**: Next.js on Vercel. Set `NEXT_PUBLIC_BACKEND_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` and `INTERNAL_AUTH_SECRET` (must match the backend's) before the first deploy, and set **Root Directory** to `dashboard`. Steps: [SETUP.md](SETUP.md) §9.
 - **Google OAuth**: add the production Vercel URL as an authorized origin and redirect URI, or sign-in fails with `redirect_uri_mismatch`. Steps: [SETUP.md](SETUP.md) §10.
 - After both are deployed, register the webhook and both cron triggers: [SETUP.md](SETUP.md) §5–7.
