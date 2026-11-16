@@ -152,6 +152,9 @@ def main() -> int:
             for row in results["ranking"]["results"].values():
                 for key in ("ndcg@3", "ci95"):
                     row[key] = {int(d): v for d, v in row[key].items()}
+            sweep = results["ranking"].get("k_sweep_mean_ndcg")
+            if sweep:
+                results["ranking"]["k_sweep_mean_ndcg"] = {int(kk): v for kk, v in sweep.items()}
         parts = set()
     if "extraction" in parts:
         print("\n== extraction ==")

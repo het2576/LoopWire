@@ -1,6 +1,6 @@
 # Loopwire eval report
 
-Run: `20261116-010320`
+Run: `20261116-115832`
 
 ## Gates
 
@@ -21,22 +21,22 @@ Run: `20261116-010320`
 
 ## Summarization (v1 prompt vs v2 prompt)
 
-System model: `gemini-3.5-flash-lite` · judge: `gemini-4-hydrogen`. A/B columns are **paired** on the 5 documents where both versions completed; the last column is v2 on all 15 completed documents (real extractions + adversarial); 3 v2 row(s) incomplete.
+System model: `gemini-3.5-flash-lite` · judge: `gemini-4-hydrogen`. A/B columns are **paired** on the 8 documents where both versions completed; the last column is v2 on all 18 completed documents (real extractions + adversarial).
 
 | Metric | v1 (paired) | v2 (paired) | v2 (all) |
 |---|---|---|---|
-| Claim-level faithfulness (↑) | 0.849 | 0.945 | 0.976 |
-| Docs with ≥1 unsupported claim (↓) | 0.600 | 0.400 | 0.200 |
-| Main-point coverage 1–5 (↑) | 4.200 | 4.200 | 4.667 |
-| Long doc: conclusion at the end captured (↑) | – | – | – |
+| Claim-level faithfulness (↑) | 0.839 | 0.966 | 0.973 |
+| Docs with ≥1 unsupported claim (↓) | 0.625 | 0.250 | 0.222 |
+| Main-point coverage 1–5 (↑) | 4.375 | 4.500 | 4.722 |
+| Long doc: conclusion at the end captured (↑) | – | – | 1 |
 | Paywall teaser flagged as thin (↑) | – | – | 1 |
 | Prompt-injection canary leaked (↓) | 0 | 0 | 0 |
 | English output (↑) | 1 | 1 | 1 |
 | ≤3 sentences (↑) | 1 | 1 | 1 |
-| No 'The article discusses…' opener (↑) | 0.800 | 1 | 0.933 |
-| Read-time error vs. word count (↓) | 0.406 | 0.000 | 0.000 |
+| No 'The article discusses…' opener (↑) | 0.875 | 1 | 0.944 |
+| Read-time error vs. word count (↓) | 0.395 | 0.000 | 0.000 |
 
-Recall cards (v2): 30 generated, grounding rate 1.000, answerable 1, tests a key idea 0.857, open-ended 0.929.
+Recall cards (v2): 32 generated, grounding rate 1.000, answerable 1, tests a key idea 0.844, open-ended 0.938.
 
 ## Recall grader
 
@@ -56,11 +56,11 @@ By category: empty 1/1, exact 5/5, informal 2/2, injection 3/3, keyword_stuffing
 | v2_k3_no_explore | 0.532 | 0.571 | 0.607 | 0.682 | 0.727 | 5.700 |
 | v2_k3_explore | 0.532 | 0.571 | 0.607 | 0.687 | 0.728 | 5.700 |
 
-K sweep (mean NDCG@3): {'1': 0.6248, '2': 0.6275, '3': 0.6251, '5': 0.6194, '8': 0.6169, '13': 0.6106} → numerically best K = 2; K 1–5 differ by less than the ±0.035 95% CI, so production uses K = 3 (most conservative value within noise of the best).
+K sweep (mean NDCG@3): {1: 0.6248, 2: 0.6275, 3: 0.6251, 5: 0.6194, 8: 0.6169, 13: 0.6106} → numerically best K = 2; K 1–5 differ by less than the ±0.035 95% CI, so production uses K = 3 (most conservative value within noise of the best).
 
 ## LLM usage
 
 | op@model | calls | failed attempts | input tok | output tok | p50 ms | p95 ms |
 |---|---|---|---|---|---|---|
-| judge_cards@gemini-4-hydrogen | 2 | 1 | 1,757 | 106 | 9888 | 9888 |
-| judge_faithfulness@gemini-4-hydrogen | 3 | 16 | 11,952 | 732 | 12032 | 13850 |
+| judge_cards@gemini-4-hydrogen | 4 | 1 | 32,925 | 212 | 9888 | 10740 |
+| judge_faithfulness@gemini-4-hydrogen | 4 | 26 | 19,458 | 1,165 | 13850 | 27351 |
