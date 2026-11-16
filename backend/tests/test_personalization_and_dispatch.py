@@ -81,7 +81,9 @@ def test_exploration_slot_only_when_adaptive_and_enough_items():
 
 def test_skips_only_inferred_for_opened_sends(db, make_user, make_item):
     user = make_user()
-    unopened, opened, latest = (models.LoopwireSend(user_id=user.id, item_count=1) for _ in range(3))
+    two_days_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=2)
+    unopened, opened = (models.LoopwireSend(user_id=user.id, item_count=1, sent_at=two_days_ago) for _ in range(2))
+    latest = models.LoopwireSend(user_id=user.id, item_count=1)  # sent just now: still inside the grace window
     db.add_all([unopened, opened, latest])
     db.commit()
     a = make_item(user, loopwire_send_id=unopened.id)
@@ -101,6 +103,23 @@ def test_skips_only_inferred_for_opened_sends(db, make_user, make_item):
     log_event(db, user.id, b.id, models.EVENT_FEEDBACK_UP)  # explicit beats inferred
     db.expire_all()
     assert {e.event_type for e in db.query(models.EngagementEvent).filter_by(item_id=b.id)} == {"feedback_up"}
+
+
+def test_previous_dispatch_skips_reach_the_next_ranking(db, make_user, make_item):
+    """Regression: the cron cycle infers skips *before* building the next
+    dispatch. Yesterday's opened-but-ignored item must count by then, even
+    though yesterday's send is still the user's latest one."""
+    user = make_user()
+    yesterday = models.LoopwireSend(user_id=user.id, item_count=2,
+                                    sent_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=24))
+    db.add(yesterday)
+    db.commit()
+    read, ignored = make_item(user, loopwire_send_id=yesterday.id), make_item(user, loopwire_send_id=yesterday.id)
+    mark_send_opened(db, yesterday.id)
+    log_event(db, user.id, read.id, models.EVENT_CLICKED_SOURCE)
+
+    assert infer_skipped_events(db, user.id) == 1
+    assert {e.item_id for e in db.query(models.EngagementEvent).filter_by(event_type="skipped")} == {ignored.id}
 
 
 def test_cold_start_ranks_by_profile_then_blends_history(db, make_user, make_item):

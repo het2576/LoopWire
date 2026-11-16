@@ -1,6 +1,7 @@
 import EmptyState from "@/components/EmptyState";
 import SignalBar from "@/components/SignalBar";
 import { getRecallStats, getStats } from "@/lib/api";
+import { TYPE_LABEL } from "@/lib/format";
 
 export default async function SignalPage() {
   const [stats, recall] = await Promise.all([getStats(), getRecallStats()]);
@@ -37,7 +38,7 @@ export default async function SignalPage() {
           {entries.map(([type, bucket]) => (
             <div key={type} className="paper-sheet p-6 sm:p-7">
               <div className="mb-4 flex items-baseline justify-between">
-                <div className="font-mono text-base font-semibold capitalize">{type}</div>
+                <div className="font-mono text-base font-semibold">{TYPE_LABEL[type] ?? type}</div>
                 <div className="rounded-full bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-mint">{bucket.total_sent} sent</div>
               </div>
               <div className="flex flex-col gap-3">

@@ -29,6 +29,12 @@ from app.models import (
 )
 from app.recall import activate_cards_for_item
 
+# How long a dispatch's items get before no-click counts as a skip. Long enough to
+# read a dispatch over a day; short enough that the next daily dispatch's ranking
+# already sees the previous one's skips (the cron cycle infers right before it
+# builds the new dispatch).
+SKIP_GRACE = dt.timedelta(hours=12)
+
 _OPPOSITE = {EVENT_FEEDBACK_UP: EVENT_FEEDBACK_DOWN, EVENT_FEEDBACK_DOWN: EVENT_FEEDBACK_UP}
 
 
@@ -65,15 +71,16 @@ def mark_send_opened(db: Session, send_id: int) -> None:
         db.commit()
 
 
-def infer_skipped_events(db: Session, user_id: int) -> int:
-    """For summarized items in *opened* sends older than the user's latest
-    send, log 'skipped' if there was no click and no feedback."""
-    latest_send = (
-        db.query(LoopwireSend).filter(LoopwireSend.user_id == user_id).order_by(LoopwireSend.id.desc()).first()
-    )
-    if latest_send is None:
-        return 0
+def infer_skipped_events(db: Session, user_id: int, now: dt.datetime | None = None) -> int:
+    """For summarized items in *opened* sends at least SKIP_GRACE old, log
+    'skipped' if there was no click and no feedback.
 
+    This used to exclude "the user's latest send" instead of using a time
+    window. The cycle runs this *before* building the next dispatch, when the
+    previous dispatch is still the latest - so its skips landed two dispatches
+    late and never reached the ranking they were meant to inform.
+    """
+    cutoff = (now or dt.datetime.now(dt.UTC)) - SKIP_GRACE
     engaged_item_ids = (
         db.query(EngagementEvent.item_id).filter(EngagementEvent.user_id == user_id).distinct().scalar_subquery()
     )
@@ -82,7 +89,7 @@ def infer_skipped_events(db: Session, user_id: int) -> int:
         .join(LoopwireSend, LoopwireSend.id == SavedItem.loopwire_send_id)
         .filter(SavedItem.user_id == user_id)
         .filter(SavedItem.status == STATUS_SUMMARIZED)
-        .filter(LoopwireSend.id != latest_send.id)
+        .filter(LoopwireSend.sent_at <= cutoff)
         .filter(LoopwireSend.opened_at.isnot(None))
         .filter(SavedItem.id.notin_(engaged_item_ids))
         .all()

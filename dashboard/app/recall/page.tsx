@@ -11,7 +11,7 @@ export default async function RecallPage() {
         <p className="page-kicker">Active recall</p>
         <h1 className="page-title mt-3">Do you still remember?</h1>
         <p className="page-intro mt-4">
-          A day after you open or 👍 something, Loopwire asks about its key idea — then waits longer each time you get
+          A day after you click through to or 👍 something, Loopwire asks about its key idea — then waits longer each time you get
           it right. Saving isn&apos;t learning; remembering is.
         </p>
       </div>
