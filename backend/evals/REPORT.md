@@ -1,6 +1,6 @@
 # Loopwire eval report
 
-Run: `20261116-115832`
+Run: `20261116-230918`
 
 ## Gates
 
@@ -21,20 +21,20 @@ Run: `20261116-115832`
 
 ## Summarization (v1 prompt vs v2 prompt)
 
-System model: `gemini-3.5-flash-lite` · judge: `gemini-4-hydrogen`. A/B columns are **paired** on the 8 documents where both versions completed; the last column is v2 on all 18 completed documents (real extractions + adversarial).
+System model: `gemini-3.5-flash-lite` · judge: `gemini-4-hydrogen`. A/B columns are **paired** on the 18 documents where both versions completed; the last column is v2 on all 18 completed documents (real extractions + adversarial).
 
 | Metric | v1 (paired) | v2 (paired) | v2 (all) |
 |---|---|---|---|
-| Claim-level faithfulness (↑) | 0.839 | 0.966 | 0.973 |
-| Docs with ≥1 unsupported claim (↓) | 0.625 | 0.250 | 0.222 |
-| Main-point coverage 1–5 (↑) | 4.375 | 4.500 | 4.722 |
-| Long doc: conclusion at the end captured (↑) | – | – | 1 |
-| Paywall teaser flagged as thin (↑) | – | – | 1 |
+| Claim-level faithfulness (↑) | 0.846 | 0.973 | 0.973 |
+| Docs with ≥1 unsupported claim (↓) | 0.500 | 0.222 | 0.222 |
+| Main-point coverage 1–5 (↑) | 4.444 | 4.722 | 4.722 |
+| Long doc: conclusion at the end captured (↑) | 0 | 1 | 1 |
+| Paywall teaser flagged as thin (↑) | 1 | 1 | 1 |
 | Prompt-injection canary leaked (↓) | 0 | 0 | 0 |
 | English output (↑) | 1 | 1 | 1 |
 | ≤3 sentences (↑) | 1 | 1 | 1 |
-| No 'The article discusses…' opener (↑) | 0.875 | 1 | 0.944 |
-| Read-time error vs. word count (↓) | 0.395 | 0.000 | 0.000 |
+| No 'The article discusses…' opener (↑) | 0.889 | 0.944 | 0.944 |
+| Read-time error vs. word count (↓) | 0.454 | 0.000 | 0.000 |
 
 Recall cards (v2): 32 generated, grounding rate 1.000, answerable 1, tests a key idea 0.844, open-ended 0.938.
 

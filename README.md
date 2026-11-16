@@ -120,7 +120,7 @@ anytime on the dashboard's **Wire** page (`/wire`) or via `/list` in Telegram.
 `POST /send-digest?key=<secret>` on your chosen schedule, which builds and
 emails the dispatch and wakes the Render free-tier service if it had spun
 down. To force one immediately:
-`curl -X POST "http://localhost:8000/send-digest?key=<SEND_LOOPWIRE_SECRET>"`.
+`curl -X POST -H "X-Cron-Key: <SEND_LOOPWIRE_SECRET>" "http://localhost:8000/send-digest?wait=true"`.
 
 ## Phase A: Multi-tenant + auth
 
@@ -238,8 +238,8 @@ Served by `backend/app/main.py` + `backend/app/routers/api.py`.
 | `GET` | `/health` | liveness check — deliberately does **not** touch the DB, so a green `/health` does not mean the app is working |
 | `GET` | `/db-ping` | readiness check — runs a real `SELECT 1`; keeps the Supabase free tier from pausing and returns **503** when the DB is unreachable. This is the one to alert on |
 | `POST` | `/telegram-webhook` | receives Telegram updates (registered automatically on startup); validates `X-Telegram-Bot-Api-Secret-Token` |
-| `POST` | `/process-pending?key=<secret>` | one extraction + summarization pass over pending items — fails closed if `PROCESS_PENDING_SECRET` unset |
-| `POST` | `/send-digest?key=<secret>` | build + send a dispatch on demand — fails closed if `SEND_LOOPWIRE_SECRET` unset |
+| `POST` | `/process-pending` (`X-Cron-Key` header, or `?key=`) | one extraction + summarization pass over pending items — fails closed if `PROCESS_PENDING_SECRET` unset |
+| `POST` | `/send-digest` (`X-Cron-Key` header, or `?key=`) | build + send a dispatch on demand — fails closed if `SEND_LOOPWIRE_SECRET` unset |
 | `GET` | `/api/loopwire-sends/latest` | most recent dispatch + its items |
 | `GET` | `/api/loopwire-sends` | history of past dispatches (summary only) |
 | `GET` | `/api/loopwire-sends/{id}` | one specific dispatch + its items |
@@ -318,21 +318,18 @@ judge `gemini-4-hydrogen`):
 | Eval | Result |
 |---|---|
 | Extraction, 25 live URLs — right outcome *and* right failure reason | **100%** (v1's own test had labeled two dead links as "paywalls") |
-| Summary faithfulness (claim-level, LLM judge), 18-doc paired A/B | v1 **0.841** → v2 **0.955** |
-| Docs with any unsupported claim | 39% → **22%** |
-| Main-point coverage (1–5) | 4.33 → **4.78** |
+| Summary faithfulness (claim-level, title-aware LLM judge), 18-doc paired A/B | v1 **0.846** → v2 **0.973** |
+| Docs with any unsupported claim | 50% → **22%** |
+| Main-point coverage (1–5) | 4.44 → **4.72** |
 | Conclusion only at the end of a 230k-char doc | v1 missed it (and claimed "no decision") → v2 found it |
 | Prompt-injection canary / paywall teaser flagged / English output | 0 leaks · flagged · 100% (both versions) |
-| Tightened v2 prompt, re-judged with a title-aware judge | v2 **0.973** on all 18 docs (22% with any unsupported claim); paired on 8 docs: v1 0.839 → v2 **0.966**, unsupported 63% → **25%** |
 | Recall cards: verbatim-grounded quote · answerable · tests a key idea · open-ended | **100%** (32/32) · **100%** · **84%** · **94%** |
 | Recall grader vs 28 hand labels (`gemini-3.5-flash-lite`) | **96%** accuracy, **0** false accepts, **3/3** injection attempts resisted (only miss: a partial answer graded incorrect) |
 | Ranking, 240 simulated users × 30 days, NDCG@3 day 14 / day 30 | v1 **0.488 / 0.482** (worse than profile-only 0.505) → v2 **0.687 / 0.728** (+41% / +51%) |
 | Cost of reading whole documents | ~1.8× summarizer input tokens, +0.4s p50 |
 
-All 8 regression gates pass. The title-aware judge has re-scored every v2 doc;
-10 of the 18 v1 baselines are still to be re-scored (free tier: 20 judge
-requests/day). Calls are cached, so re-running `evals.run_all` only pays for
-what's missing.
+All 8 regression gates pass. Calls are cached, so re-running `evals.run_all`
+after a prompt change only pays for what changed.
 
 - [ ] **Deployed** — `render.yaml` + Vercel steps are ready (see [Deployment](#deployment)); not yet pushed to production hosting.
 
