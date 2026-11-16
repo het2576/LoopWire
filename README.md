@@ -39,7 +39,7 @@ aren't in this repo, but every decision they drove is documented below.
 1. **Sign in** — Google sign-in, one account per person. Your data is yours alone; see [Phase A](#phase-a-multi-tenant--auth).
 2. **Ingest** — forward any link to your Telegram bot (once linked to your account). Saved instantly, no per-link setup.
 3. **Extract** — an on-demand pass (every 5-10 min, no always-on process) pulls clean article text (`trafilatura`) or video transcripts (`youtube-transcript-api`).
-4. **Summarize** — Gemini 3.5 Flash-Lite writes a grounded ≤3-sentence summary from the *whole* document, treating page text as untrusted data. Claim-level faithfulness is measured, not asserted: **0.955** on the eval set (see [Verification](#verification)). Paywalled, dead and blocked links are reported with their real reason instead of a made-up summary.
+4. **Summarize** — Gemini 3.5 Flash-Lite writes a grounded ≤3-sentence summary from the *whole* document, treating page text as untrusted data. Claim-level faithfulness is measured, not asserted: **0.973** on the eval set (see [Verification](#verification)). Paywalled, dead and blocked links are reported with their real reason instead of a made-up summary.
 5. **Rank & explain** — items are ordered by similarity to what you've actually opened and clicked (not a static bio), with a relevance note naming the specific past item it resembles once there's enough history — see [Phase B](#phase-b-adaptive-personalization-the-actual-differentiator).
 6. **Deliver** — once a day (configurable), everything ranked since your last dispatch is bundled and sent by email *and* posted to your web dashboard.
 7. **Log engagement** — every dispatch item's opens and click-throughs are recorded — the data Phase B's ranking runs on.
@@ -318,21 +318,21 @@ judge `gemini-4-hydrogen`):
 | Eval | Result |
 |---|---|
 | Extraction, 25 live URLs — right outcome *and* right failure reason | **100%** (v1's own test had labeled two dead links as "paywalls") |
-| Summary faithfulness (claim-level, LLM judge), 18 docs paired A/B | v1 **0.841** → v2 **0.955** |
+| Summary faithfulness (claim-level, LLM judge), 18-doc paired A/B | v1 **0.841** → v2 **0.955** |
 | Docs with any unsupported claim | 39% → **22%** |
 | Main-point coverage (1–5) | 4.33 → **4.78** |
 | Conclusion only at the end of a 230k-char doc | v1 missed it (and claimed "no decision") → v2 found it |
 | Prompt-injection canary / paywall teaser flagged / English output | 0 leaks · flagged · 100% (both versions) |
-| Summary faithfulness, tightened v2 prompt + title-aware judge (15/18 docs so far) | v2 **0.976**, 20% of docs with any unsupported claim |
-| Recall cards: verbatim-grounded quote · answerable · tests a key idea · open-ended | **100%** (30/30) · **100%** · **86%** · **93%** |
+| Tightened v2 prompt, re-judged with a title-aware judge | v2 **0.973** on all 18 docs (22% with any unsupported claim); paired on 8 docs: v1 0.839 → v2 **0.966**, unsupported 63% → **25%** |
+| Recall cards: verbatim-grounded quote · answerable · tests a key idea · open-ended | **100%** (32/32) · **100%** · **84%** · **94%** |
 | Recall grader vs 28 hand labels (`gemini-3.5-flash-lite`) | **96%** accuracy, **0** false accepts, **3/3** injection attempts resisted (only miss: a partial answer graded incorrect) |
 | Ranking, 240 simulated users × 30 days, NDCG@3 day 14 / day 30 | v1 **0.488 / 0.482** (worse than profile-only 0.505) → v2 **0.687 / 0.728** (+41% / +51%) |
 | Cost of reading whole documents | ~1.8× summarizer input tokens, +0.4s p50 |
 
-All 8 regression gates pass. Still filling in after the free-tier quota resets
-(20 requests/model/day): re-judging the remaining v1 baselines and 3 v2 docs
-with the title-aware judge — calls are cached, so re-running costs only what's
-missing.
+All 8 regression gates pass. The title-aware judge has re-scored every v2 doc;
+10 of the 18 v1 baselines are still to be re-scored (free tier: 20 judge
+requests/day). Calls are cached, so re-running `evals.run_all` only pays for
+what's missing.
 
 - [ ] **Deployed** — `render.yaml` + Vercel steps are ready (see [Deployment](#deployment)); not yet pushed to production hosting.
 
