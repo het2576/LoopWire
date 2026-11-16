@@ -20,6 +20,7 @@ What changed vs. v1 and why (evals/ranking_eval.py quantifies each):
 """
 
 import datetime as dt
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -38,6 +39,8 @@ from app.models import (
     SavedItem,
     User,
 )
+
+logger = logging.getLogger("loopwire.personalization")
 
 SIGNAL_WEIGHTS = {
     EVENT_FEEDBACK_UP: 2.0,
@@ -118,7 +121,13 @@ def profile_embedding(db: Session, user: User) -> list[float] | None:
     if not user.interest_profile_text:
         return None
     if user.interest_profile_embedding is None:
-        user.interest_profile_embedding = compute_embedding(user.interest_profile_text)
+        try:
+            user.interest_profile_embedding = compute_embedding(user.interest_profile_text)
+        except Exception:
+            # A failed embedding call (quota, outage) must not cost the user their
+            # dispatch: rank without the written profile and retry next time.
+            logger.exception("Profile embedding failed for user #%s - ranking without it", user.id)
+            return None
     return user.interest_profile_embedding
 
 

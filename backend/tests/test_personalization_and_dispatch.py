@@ -180,6 +180,22 @@ def test_exploration_pick_gets_honest_note(db, make_user, make_item):
     assert pick.item_id == explorer.id and pick.relevance_note == EXPLORATION_NOTE
 
 
+def test_profile_embedding_failure_does_not_block_the_dispatch(db, make_user, make_item, monkeypatch):
+    """Users migrated from v1 have profile text but no profile embedding, so
+    their first v2 dispatch computes it. If that call fails, the dispatch still
+    goes out (ranked without the profile) and the embedding is retried later."""
+    def boom(text):
+        raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr("app.personalization.compute_embedding", boom)
+    user = make_user(profile="LLM engineering")
+    make_item(user)
+    bundle = build_loopwire_send(db, user.id)
+    assert bundle is not None and len(bundle.items) == 1
+    assert bundle.ctx.profile_vector is None
+    assert db.get(models.User, user.id).interest_profile_embedding is None
+
+
 def test_daily_cap_uses_local_day(db, make_user, monkeypatch):
     user = make_user()
     # 23:00 IST yesterday == 17:30 UTC yesterday: different local day
