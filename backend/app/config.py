@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # LLM
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"  # 2.5-flash routes here from 2026-12-01 anyway
 
     # Email (Resend) - sender address is fixed/branded; the recipient is
     # each user's own account email now (Phase A), passed per-call instead
@@ -68,6 +68,24 @@ class Settings(BaseSettings):
     # default - YouTube extraction just fails with a clear error until set.
     webshare_proxy_username: str = ""
     webshare_proxy_password: str = ""
+
+    # --- Signed engagement links ---
+    # HMAC key for /r/<token>, /f/<token> and the per-send open pixel. These
+    # links are public (email clients can't send auth headers), so they used to
+    # take a bare sequential item id: anyone could walk /r/1, /r/2, ... and
+    # read every user's saved URLs, or forge clicks into someone's ranking.
+    # Falls back to internal_auth_secret so a missing value never means
+    # "unsigned" - see tracking.py.
+    tracking_signing_secret: str = ""
+
+    # Timezone used for "per day" caps and the dispatch date. Caps used to
+    # reset at UTC midnight, i.e. 5:30am for the IST users this targets.
+    app_timezone: str = "Asia/Kolkata"
+
+    # --- Evals (evals/) ---
+    # Judge model for LLM-graded evals. Kept separate from gemini_model so the
+    # system under test isn't grading itself with the same checkpoint.
+    eval_judge_model: str = ""
 
 
 @lru_cache

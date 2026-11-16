@@ -2,7 +2,7 @@ import DispatchHeader from "@/components/DispatchHeader";
 import EmptyState from "@/components/EmptyState";
 import ItemSlip from "@/components/ItemSlip";
 import ProfileStatusBadge from "@/components/ProfileStatusBadge";
-import { getLatestLoopwireSend, markOpened } from "@/lib/api";
+import { getLatestLoopwireSend, markSendViewed } from "@/lib/api";
 
 export default async function LatestPage() {
   const send = await getLatestLoopwireSend();
@@ -25,9 +25,7 @@ export default async function LatestPage() {
     );
   }
 
-  for (const item of send.items) {
-    markOpened(item.item_id);
-  }
+  await markSendViewed(send.id);
 
   return (
     <div>

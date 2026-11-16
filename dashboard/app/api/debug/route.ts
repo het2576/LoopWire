@@ -5,6 +5,11 @@ const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:80
 const INTERNAL_AUTH_SECRET = process.env.INTERNAL_AUTH_SECRET ?? "";
 
 export async function GET() {
+  // Diagnostics only: exposes env shape and mints a connection code on every
+  // call, so it's disabled in production unless explicitly enabled.
+  if (process.env.NODE_ENV === "production" && process.env.ENABLE_DEBUG_ROUTE !== "1") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const session = await auth();
 
   // Check 1: Environment variables

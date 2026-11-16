@@ -1,3 +1,4 @@
+import FeedbackButtons from "@/components/FeedbackButtons";
 import { LoopwireItem } from "@/lib/api";
 import { TYPE_LABEL } from "@/lib/format";
 
@@ -19,17 +20,17 @@ export default function ItemSlip({ item, index }: { item: LoopwireItem; index: n
             item.couldnt_extract ? "text-alert" : "text-ink/50"
           }`}
         >
-          {item.couldnt_extract ? "Couldn’t extract this source" : "Reading note"}
+          {item.couldnt_extract ? "Couldn’t extract this source" : item.is_exploration ? "Outside your usual reading" : "Reading note"}
         </div>
 
         <h2 className="mt-2 font-mono text-xl font-semibold leading-tight tracking-[-0.055em] text-ink sm:text-2xl">{item.title}</h2>
 
         {item.couldnt_extract ? (
           <p className="mt-2 text-[15px] leading-relaxed text-ink/70">
-            {item.type === "unsupported"
-              ? "This source isn't supported for extraction yet (e.g. social posts or playlists)."
-              : "We couldn't pull readable content from this one — a paywall or missing captions, most likely."}{" "}
-            The raw link is still here.
+            {item.failure_reason
+              ? `Couldn’t process this one: ${item.failure_reason}.`
+              : "We couldn't pull readable content from this one."}{" "}
+            The original link is still here.
           </p>
         ) : (
           <>
@@ -54,12 +55,15 @@ export default function ItemSlip({ item, index }: { item: LoopwireItem; index: n
           </>
         )}
 
-        <a
-          href={item.read_url}
-          className="mt-5 inline-flex items-center gap-2 rounded-lg bg-ink-deep px-3.5 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-signal"
-        >
-          {item.couldnt_extract ? "Open raw link" : "Read source"} <span aria-hidden>↗</span>
-        </a>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <a
+            href={item.read_url}
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-ink-deep px-3.5 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-signal"
+          >
+            {item.couldnt_extract ? "Open raw link" : "Read source"} <span aria-hidden>↗</span>
+          </a>
+          {!item.couldnt_extract && <FeedbackButtons itemId={item.item_id} initial={item.feedback} />}
+        </div>
         </div>
       </div>
     </li>

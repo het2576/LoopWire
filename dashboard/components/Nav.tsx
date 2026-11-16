@@ -28,12 +28,12 @@ export default async function Nav() {
                 await signOut({ redirectTo: "/signin" });
               }}
             >
-              <button type="submit" className="hidden font-display text-[12px] font-semibold text-wire transition-colors hover:text-alert sm:block">
+              <button type="submit" className="font-display text-[12px] font-semibold text-wire transition-colors hover:text-alert">
                 Sign out
               </button>
             </form>
           </div>
-          <div className="sm:hidden"><NavLinks /></div>
+          <div className="absolute sm:hidden"><NavLinks /></div>
         </>) : <div className="flex items-center gap-3"><span className="hidden font-display text-sm font-medium text-wire sm:block">Your personal reading space</span><ThemeToggle /></div>}
       </div>
     </header>

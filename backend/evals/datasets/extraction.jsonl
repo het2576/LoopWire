@@ -1,0 +1,25 @@
+{"id": "pg-greatwork", "url": "https://www.paulgraham.com/greatwork.html", "expect_success": true, "min_words": 8000, "note": "very long essay"}
+{"id": "simonw-2024", "url": "https://simonwillison.net/2024/Dec/31/llms-in-2024/", "expect_success": true, "min_words": 3000, "note": "long-form blog"}
+{"id": "fowler-microservices", "url": "https://martinfowler.com/articles/microservices.html", "expect_success": true, "min_words": 3000, "note": "classic article"}
+{"id": "altman-successful", "url": "https://blog.samaltman.com/how-to-be-successful", "expect_success": true, "min_words": 1500, "note": "blog platform"}
+{"id": "lilian-agents", "url": "https://lilianweng.github.io/posts/2023-06-23-agent/", "expect_success": true, "min_words": 3000, "note": "technical ML post"}
+{"id": "wiki-spaced-rep", "url": "https://en.wikipedia.org/wiki/Spaced_repetition", "expect_success": true, "min_words": 1500, "note": "wikipedia"}
+{"id": "v1-nyt-deadlink", "url": "https://www.nytimes.com/2024/01/01/technology/ai-year-review.html", "expect_success": false, "expect_error_in": ["http_404"], "note": "v1 test labeled this a paywall; it is a 404 for every client"}
+{"id": "nyt-real-paywall", "url": "https://www.nytimes.com/2023/12/27/business/media/new-york-times-open-ai-microsoft-lawsuit.html", "expect_success": false, "expect_error_in": ["paywalled"], "note": "real paywalled article (200 + ~300-word teaser + isAccessibleForFree=false)"}
+{"id": "v1-stratechery-deadlink", "url": "https://stratechery.com/2024/an-image-generation-business-model/", "expect_success": false, "expect_error_in": ["http_404"], "note": "v1 test labeled this a paywall; it is a 404"}
+{"id": "medium-cloudflare", "url": "https://medium.com/@karpathy/software-2-0-a64152b37c35", "expect_success": false, "expect_error_in": ["http_403"], "note": "bot-protected platform"}
+{"id": "dead-verge", "url": "https://www.theverge.com/2024/1/1/some-nonexistent-slug-xyz", "expect_success": false, "expect_error_in": ["http_404"], "note": "dead link must be reported as dead, not paywall"}
+{"id": "httpbin-404", "url": "https://httpbin.org/status/404", "expect_success": false, "expect_error_in": ["http_404"], "note": "deterministic 404"}
+{"id": "httpbin-403", "url": "https://httpbin.org/status/403", "expect_success": false, "expect_error_in": ["http_403"], "note": "deterministic 403"}
+{"id": "ssrf-metadata", "url": "http://169.254.169.254/latest/meta-data/", "expect_success": false, "expect_error_in": ["blocked_url"], "note": "cloud metadata SSRF"}
+{"id": "ssrf-localhost", "url": "http://localhost:54329/", "expect_success": false, "expect_error_in": ["blocked_url"], "note": "local service SSRF"}
+{"id": "arxiv-attention-pdf", "url": "https://arxiv.org/pdf/1706.03762", "expect_success": true, "min_words": 4000, "note": "PDF"}
+{"id": "arxiv-abs", "url": "https://arxiv.org/abs/1706.03762", "expect_success": true, "min_words": 100, "note": "arxiv abstract page (article path)"}
+{"id": "gh-nanogpt", "url": "https://github.com/karpathy/nanoGPT", "expect_success": true, "min_words": 500, "note": "repo README"}
+{"id": "gh-missing", "url": "https://github.com/this-owner-does-not-exist-zz9/nope-repo", "expect_success": false, "expect_error_in": ["no_readme"], "note": "nonexistent repo"}
+{"id": "hn-dropbox", "url": "https://news.ycombinator.com/item?id=8863", "expect_success": true, "min_words": 200, "note": "famous HN thread"}
+{"id": "yt-rickroll", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "expect_success": true, "min_words": 100, "note": "captions", "residential_ip_only": true}
+{"id": "yt-zoo", "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "expect_success": true, "min_words": 10, "note": "first YouTube video", "residential_ip_only": true}
+{"id": "yt-3b1b", "url": "https://www.youtube.com/watch?v=aircAruvnKk", "expect_success": true, "min_words": 2000, "note": "long educational", "residential_ip_only": true}
+{"id": "yt-invalid", "url": "https://www.youtube.com/watch?v=00000000000", "expect_success": false, "expect_error_in": ["video_unavailable"], "note": "nonexistent id", "residential_ip_only": true}
+{"id": "yt-live", "url": "https://www.youtube.com/live/jfKfPfyJRdk", "expect_success": false, "expect_error_in": ["no_captions", "transcript_fetch_failed"], "note": "24/7 live stream", "residential_ip_only": true}

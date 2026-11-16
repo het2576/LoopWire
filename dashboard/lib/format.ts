@@ -40,6 +40,7 @@ export const STATUS_META: Record<string, { label: string; tone: "wire" | "signal
   pending: { label: "queued", tone: "wire" },
   extracted: { label: "extracting", tone: "signal" },
   extraction_failed: { label: "couldn't extract", tone: "alert" },
+  summarization_failed: { label: "couldn't summarize", tone: "alert" },
   summarized: { label: "ready", tone: "ok" },
   sent: { label: "sent", tone: "wire" },
 };

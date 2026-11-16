@@ -18,6 +18,7 @@ Commands
 /setprofile     — update interest profile
 /stats          — engagement stats by content type
 /search <q>     — search saved items by title / URL keyword
+/quiz           — active recall: answer a question about something you read
 
 Production runs this via webhook, embedded in the FastAPI app (app/main.py's
 /telegram-webhook route calls build_application() from here and forwards
@@ -34,7 +35,13 @@ import re
 from sqlalchemy.orm import Session
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -48,23 +55,33 @@ from app.models import (
     ITEM_TYPE_UNSUPPORTED,
     ITEM_TYPE_YOUTUBE,
     MAX_SAVED_LINKS_PER_DAY,
+    RECALL_ACTIVE,
+    RECALL_RETIRED,
     STATUS_EXTRACTED,
     STATUS_EXTRACTION_FAILED,
     STATUS_PENDING,
     STATUS_SENT,
+    STATUS_SUMMARIZATION_FAILED,
     STATUS_SUMMARIZED,
+    VERDICT_CORRECT,
+    VERDICT_PARTIAL,
     ConnectionCode,
+    RecallCard,
     SavedItem,
     User,
 )
-from app.url_utils import classify_url, find_first_url
+from app.recall import apply_review, due_cards_query, grade_answer
+from app.timeutil import app_tz, local_day_start_utc
+from app.url_utils import canonicalize_url, classify_url, find_first_url
 from app.worker import run_process_pending_cycle
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("loopwire.telegram_bot")
 
 CONNECTION_CODE_TTL_MINUTES = 15
 _processing_user_ids: set[int] = set()
+# Strong refs: asyncio only keeps weak references to tasks, so a fire-and-forget
+# create_task() can be garbage-collected mid-run.
+_background_tasks: set[asyncio.Task] = set()
 
 
 async def _process_user_queue(user_id: int) -> None:
@@ -86,6 +103,7 @@ STATUS_EMOJI = {
     STATUS_PENDING: "⏳",
     STATUS_EXTRACTED: "📄",
     STATUS_EXTRACTION_FAILED: "⚠️",
+    STATUS_SUMMARIZATION_FAILED: "⚠️",
     STATUS_SUMMARIZED: "✅",
     STATUS_SENT: "📬",
 }
@@ -94,6 +112,7 @@ STATUS_LABEL = {
     STATUS_PENDING: "queued",
     STATUS_EXTRACTED: "extracted",
     STATUS_EXTRACTION_FAILED: "failed",
+    STATUS_SUMMARIZATION_FAILED: "failed",
     STATUS_SUMMARIZED: "ready",
     STATUS_SENT: "sent",
 }
@@ -179,6 +198,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/list — see your saved items\n"
         "/pending — items still processing\n"
         "/profile — view your interest profile\n"
+        "/quiz — test yourself on what you've read\n"
         "/help — full command reference"
     )
     await update.effective_message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -198,6 +218,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Profile*\n"
         "/profile — show current interest profile\n"
         "/setprofile \\<text\\> — update your interests\n\n"
+        "*Recall*\n"
+        "/quiz — get a question about something you read; just reply with your answer\n\n"
         "*Stats*\n"
         "/stats — engagement breakdown by content type\n\n"
         "*Ingestion*\n"
@@ -239,7 +261,7 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        age = dt.datetime.now(dt.timezone.utc) - connection.created_at
+        age = dt.datetime.now(dt.UTC) - connection.created_at
         if age > dt.timedelta(minutes=CONNECTION_CODE_TTL_MINUTES):
             await update.effective_message.reply_text(
                 "❌ That code expired\\. Generate a new one on the Settings page\\.",
@@ -257,7 +279,7 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         user.telegram_chat_id = chat_id
-        connection.used_at = dt.datetime.now(dt.timezone.utc)
+        connection.used_at = dt.datetime.now(dt.UTC)
         db.commit()
         user_email = user.email
 
@@ -279,15 +301,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await message.reply_text(NOT_LINKED_TEXT, parse_mode=ParseMode.MARKDOWN_V2)
             return
 
-        if not url:
-            # Give a nudge instead of silent ignore
+        if not url and user.pending_recall_card_id:
+            card_id = user.pending_recall_card_id
+            user_id = user.id
+        else:
+            card_id = None
+        if not url and card_id is None:
             await message.reply_text(
                 "No link detected. Paste or forward a URL and I'll queue it for your next dispatch. "
                 "Use /help to see available commands."
             )
             return
 
-        today_start = dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    if card_id is not None:
+        await _grade_reply(message, user_id, card_id, text)
+        return
+
+    with SessionLocal() as db:
+        user = _resolve_user(db, chat_id)
+        if user is None:
+            return
+        canonical = canonicalize_url(url)
+        existing = (
+            db.query(SavedItem).filter(SavedItem.user_id == user.id, SavedItem.canonical_url == canonical).first()
+        )
+        if existing is not None:
+            await message.reply_text(
+                f"🔁 Already saved as *\\#{existing.id}* — {_escape((existing.title or existing.url)[:60])}\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        today_start = local_day_start_utc()
         saved_today = (
             db.query(SavedItem)
             .filter(SavedItem.user_id == user.id, SavedItem.added_at >= today_start)
@@ -310,6 +355,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         item = SavedItem(
             user_id=user.id,
             url=url,
+            canonical_url=canonical,
             type=item_type,
             status=STATUS_EXTRACTION_FAILED if is_unsupported else STATUS_PENDING,
             extraction_error=(
@@ -321,7 +367,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         db.add(item)
         db.commit()
-        db.refresh(item)
+        # Read ids while the session is open: commit() expires every instance,
+        # and touching `user.id` after the session closed raised
+        # DetachedInstanceError *after* the "Saved" reply - which fired
+        # on_error and told the user their (saved) link was NOT saved.
+        item_id, owner_id = item.id, user.id
 
     type_e = TYPE_EMOJI.get(item_type, "🔗")
     type_l = TYPE_LABEL.get(item_type, "Link")
@@ -329,7 +379,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if is_unsupported:
         await message.reply_text(
-            f"{type_e} *Saved \\#{item.id}* — Raw link\n"
+            f"{type_e} *Saved \\#{item_id}* — Raw link\n"
             f"`{_escape(short_url)}`\n\n"
             "⚠️ This source \\(e\\.g\\. social media\\) can't be extracted, "
             "but the link will appear in your next dispatch\\.",
@@ -337,13 +387,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     else:
         await message.reply_text(
-            f"{type_e} *Saved \\#{item.id}* — {_escape(type_l)}\n"
+            f"{type_e} *Saved \\#{item_id}* — {_escape(type_l)}\n"
             f"`{_escape(short_url)}`\n\n"
             "✅ Queued for extraction and summarization\\. "
             "Use /list to check status\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        asyncio.create_task(_process_user_queue(user.id))
+        task = asyncio.create_task(_process_user_queue(owner_id))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -570,6 +622,7 @@ async def set_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         user.interest_profile_text = new_text
+        user.interest_profile_embedding = None
         db.commit()
 
     await update.effective_message.reply_text(
@@ -602,12 +655,97 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         bar = "█" * round(rate * 10) + "░" * (10 - round(rate * 10))
         lines.append(
             f"*{_escape(content_type.title())}*\n"
-            f"  Sent: {bucket['total_sent']} · Opened: {bucket['opened']} · "
-            f"Clicked: {bucket['clicked_source']} · Skipped: {bucket['skipped']}\n"
+            f"  Sent: {bucket['total_sent']} · Clicked: {bucket['clicked_source']} · "
+            f"👍 {bucket['feedback_up']} · 👎 {bucket['feedback_down']} · Skipped: {bucket['skipped']}\n"
             f"  `{bar}` {rate:.0%}"
         )
 
     await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+
+# ── Active recall ─────────────────────────────────────────────────────────────
+
+VERDICT_EMOJI = {VERDICT_CORRECT: "✅", VERDICT_PARTIAL: "🟡"}
+
+
+async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    with SessionLocal() as db:
+        user = _resolve_user(db, chat_id)
+        if user is None:
+            await update.effective_message.reply_text(NOT_LINKED_TEXT, parse_mode=ParseMode.MARKDOWN_V2)
+            return
+        q = due_cards_query(db, user.id)
+        card = q.first()
+        if card is None:
+            upcoming = (
+                db.query(RecallCard)
+                .filter(RecallCard.user_id == user.id, RecallCard.state == RECALL_ACTIVE)
+                .order_by(RecallCard.due_at.asc())
+                .first()
+            )
+            user.pending_recall_card_id = None
+            db.commit()
+            if upcoming and upcoming.due_at:
+                when = upcoming.due_at.astimezone(app_tz()).strftime("%b %d")
+                msg = f"🧠 Nothing due right now — next question on {when}."
+            else:
+                msg = (
+                    "🧠 No recall questions yet. Questions unlock a day after you open "
+                    "or 👍 an item from your dispatch."
+                )
+            await update.effective_message.reply_text(msg)
+            return
+        remaining = q.count()
+        user.pending_recall_card_id = card.id
+        source = (card.item.title or card.item.url)[:80]
+        question = card.question
+        db.commit()
+
+    await update.effective_message.reply_text(
+        f"🧠 *Recall* \\({remaining} due\\)\n\n{_escape(question)}\n\n"
+        f"_from “{_escape(source)}” — reply with your answer, or “idk”_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+
+async def _grade_reply(message, user_id: int, card_id: int, answer: str) -> None:
+    with SessionLocal() as db:
+        card = db.query(RecallCard).filter(RecallCard.id == card_id, RecallCard.user_id == user_id).first()
+        if card is None:
+            return
+        question, reference, evidence = card.question, card.answer, card.evidence_quote
+
+    # LLM call off the event loop - it takes seconds and would otherwise stall
+    # every other webhook update being processed.
+    try:
+        result = await asyncio.to_thread(grade_answer, question, reference, evidence, answer)
+    except Exception:
+        logger.exception("Recall grading failed for card %s", card_id)
+        await message.reply_text("⚠️ Couldn't grade that right now — try /quiz again in a bit.")
+        return
+
+    with SessionLocal() as db:
+        card = db.get(RecallCard, card_id)
+        user = db.get(User, user_id)
+        if card is None or user is None:
+            return
+        apply_review(db, card, result.verdict, user_answer=answer, feedback=result.feedback, grader="llm")
+        user.pending_recall_card_id = None
+        remaining = due_cards_query(db, user_id).count()
+        retired = card.state == RECALL_RETIRED
+        next_due = card.due_at
+        db.commit()
+
+    emoji = VERDICT_EMOJI.get(result.verdict, "❌")
+    lines = [f"{emoji} {result.feedback}", "", f"Answer: {reference}"]
+    if retired:
+        lines.append("\n🎓 You've got this one for good — retired.")
+    elif next_due:
+        lines.append(f"\nNext review in {max(1, (next_due - dt.datetime.now(dt.UTC)).days)} day(s).")
+    if remaining:
+        lines.append(f"/quiz for the next one ({remaining} due).")
+    await message.reply_text("\n".join(lines))
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -661,12 +799,14 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("profile", show_profile))
     application.add_handler(CommandHandler("setprofile", set_profile))
     application.add_handler(CommandHandler("stats", show_stats))
+    application.add_handler(CommandHandler("quiz", quiz))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(on_error)
     return application
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     """Standalone long-polling mode - local development only. Production runs
     the bot inside the FastAPI app via a webhook instead (see app/main.py's
     /telegram-webhook route and lifespan). Telegram rejects having both a
